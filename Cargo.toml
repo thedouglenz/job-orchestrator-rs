@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "k8s-client",
+    "types",
+    "dag-orchestrator",
+    "executor-core",
+    "database",
+]
+resolver = "2"
+
+[package]
+name = "job-orchestrator"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "job-orchestrator"
+path = "src/main.rs"
+
+[dependencies]
+executor-core = { path = "executor-core" }
+types = { path = "types" }
+k8s-client = { path = "k8s-client" }
+database = { path = "database" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full", "signal"] }
+hostname = "0.4"
+async-trait = "0.1"
