@@ -1,0 +1,82 @@
+# Minikube-specific configuration for Rust Executor
+# IMPORTANT: Override sensitive values in secrets-minikube.yaml (not committed)
+# 
+# Usage:
+#   helm install rust-executor . \
+#     --namespace job-orchestrator \
+#     --create-namespace \
+#     -f values-minikube.yaml \
+#     -f secrets-minikube.yaml
+
+# Executor Service
+executor:
+  enabled: true
+  replicaCount: 1  # Reduced for minikube
+  
+  image:
+    # Override in secrets-minikube.yaml with your actual registry/project
+    repository: us-docker.pkg.dev/YOUR_GCP_PROJECT_ID/job-orchestrator/rust-executor
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  
+  imagePullSecrets:
+    - name: gcr-secret
+  
+  # Executor configuration
+  topics: "default"  # Or "ALL" to process all topics
+  batchSize: 3  # Reduced for minikube
+  pollInterval: 5000  # milliseconds (only used in polling mode)
+  eventDriven: true  # Enable event-driven mode (recommended)
+  kubernetesNamespace: "default"
+  
+  # Additional environment variables if needed
+  env: {}
+  
+  resources:
+    requests:
+      cpu: 100m  # Reduced for minikube
+      memory: 256Mi  # Reduced for minikube
+    limits:
+      cpu: 500m  # Reduced for minikube
+      memory: 512Mi  # Reduced for minikube
+
+# PostgreSQL (using Bitnami chart)
+postgresql:
+  enabled: true
+  
+  # Use specific PostgreSQL image for minikube compatibility
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 16.4.0-debian-12-r14
+  
+  auth:
+    username: jobqueue
+    password: CHANGE_ME  # Override in secrets-minikube.yaml
+    database: jobqueue
+  
+  primary:
+    persistence:
+      enabled: true
+      size: 2Gi  # Reduced for minikube (from default 10Gi)
+    
+    resources:
+      requests:
+        cpu: 100m  # Reduced for minikube
+        memory: 256Mi  # Reduced for minikube
+      limits:
+        cpu: 500m  # Reduced for minikube
+        memory: 512Mi  # Reduced for minikube
+    
+    initdb:
+      scripts:
+        init.sql: |
+          -- Grant all privileges
+          GRANT ALL PRIVILEGES ON DATABASE jobqueue TO jobqueue;
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO jobqueue;
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO jobqueue;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO jobqueue;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO jobqueue;
+
+# Logging
+logLevel: debug  # More verbose for minikube development

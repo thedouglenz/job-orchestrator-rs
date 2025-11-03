@@ -9,13 +9,15 @@ use crate::database::{
     JobQueueRepository,
 };
 
-use types::{QueuedJob, JobOutputs, JobRequest};
+use types::{QueuedJob, JobOutputs, JobRequest, ReadyNotification, Priority, ExecutionMode};
 
 /// DAG Orchestrator handles DAG execution orchestration logic
 pub struct DAGOrchestrator {
     dag_execution_repo: Arc<dyn DAGExecutionRepository>,
     dag_template_repo: Arc<dyn DAGTemplateRepository>,
     job_repo: Arc<dyn JobQueueRepository>,
+    /// Optional channel sender for event-driven job readiness notifications
+    ready_tx: Option<tokio::sync::mpsc::UnboundedSender<ReadyNotification>>,
 }
 
 impl DAGOrchestrator {
@@ -24,10 +26,20 @@ impl DAGOrchestrator {
         dag_template_repo: Arc<dyn DAGTemplateRepository>,
         job_repo: Arc<dyn JobQueueRepository>,
     ) -> Self {
+        Self::new_with_channel(dag_execution_repo, dag_template_repo, job_repo, None)
+    }
+
+    pub fn new_with_channel(
+        dag_execution_repo: Arc<dyn DAGExecutionRepository>,
+        dag_template_repo: Arc<dyn DAGTemplateRepository>,
+        job_repo: Arc<dyn JobQueueRepository>,
+        ready_tx: Option<tokio::sync::mpsc::UnboundedSender<ReadyNotification>>,
+    ) -> Self {
         Self {
             dag_execution_repo,
             dag_template_repo,
             job_repo,
+            ready_tx,
         }
     }
 
@@ -110,18 +122,142 @@ impl DAGOrchestrator {
                 .get_execution(dag_execution_id, false)
                 .await?;
 
-            // Create jobs for each child node
-            for child_node in child_nodes {
-                self.create_job_for_node(
-                    dag_execution_id,
-                    &child_node.id,
-                    &dag_execution.topic,
-                    &dag_execution.execution_payload,
-                    outputs,
-                    dag_execution.priority,
-                    &dag_execution.created_by,
-                )
-                .await?;
+            // Check execution mode (default to Parallel if not specified)
+            let execution_mode = child_nodes.first()
+                .map(|n| n.execution_mode)
+                .unwrap_or(ExecutionMode::Parallel);
+
+            let execution_mode_str = match execution_mode {
+                ExecutionMode::Sequential => "sequential",
+                ExecutionMode::Parallel => "parallel",
+                ExecutionMode::Limited(n) => {
+                    // Use a temporary string for limited mode
+                    return Err(format!("Limited execution mode ({}) not yet fully implemented", n));
+                }
+            };
+            
+            info!(
+                child_count = child_nodes.len(),
+                execution_mode = execution_mode_str,
+                "Creating jobs for child nodes"
+            );
+
+            match execution_mode {
+                ExecutionMode::Parallel => {
+                    // Batch create all sibling jobs
+                    // First, prepare all job requests (need async context)
+                    let mut job_requests = Vec::with_capacity(child_nodes.len());
+                    
+                    for child_node in &child_nodes {
+                        let node = self.dag_template_repo.get_node(&child_node.id).await?;
+                        
+                        let inputs = self.resolve_node_inputs(
+                            child_node.input_mapping.as_ref(),
+                            &dag_execution.execution_payload,
+                            outputs.as_ref(),
+                        );
+
+                        job_requests.push(JobRequest {
+                            topic: dag_execution.topic.clone(),
+                            image_id: node.image_id.clone(),
+                            job_name: Some(node.node_name.clone()),
+                            command: node.command.clone(),
+                            args: node.args.clone(),
+                            environment_variables: node.environment_variables.clone(),
+                            resource_overrides: node.resource_overrides.clone(),
+                            priority: Some(dag_execution.priority),
+                            max_retries: Some(node.max_retries),
+                            created_by: dag_execution.created_by.clone(),
+                            inputs: Some(inputs),
+                            labels: None,
+                        });
+                    }
+
+                    // Create all jobs in a single batch transaction
+                    let job_ids = self.job_repo
+                        .enqueue_jobs_batch(&job_requests)
+                        .await
+                        .map_err(|e| format!("Failed to enqueue jobs batch: {}", e))?;
+
+                    // Update node executions with job IDs and mark as READY
+                    for (i, child_node) in child_nodes.iter().enumerate() {
+                        let node_execution = self
+                            .dag_execution_repo
+                            .get_node_execution_by_dag_and_node(dag_execution_id, &child_node.id)
+                            .await?;
+
+                        let inputs = self.resolve_node_inputs(
+                            child_node.input_mapping.as_ref(),
+                            &dag_execution.execution_payload,
+                            outputs.as_ref(),
+                        );
+
+                        self.dag_execution_repo
+                            .update_node_execution_status(
+                                &node_execution.id,
+                                DAGNodeStatus::Ready,
+                                Some(NodeExecutionUpdate {
+                                    outputs: None,
+                                    error_message: None,
+                                    job_id: Some(job_ids[i].clone()),
+                                    job_topic: Some(dag_execution.topic.clone()),
+                                    inputs: Some(inputs),
+                                }),
+                            )
+                            .await?;
+                    }
+
+                    info!(
+                        job_count = job_ids.len(),
+                        dag_execution_id = dag_execution_id,
+                        "Created jobs in batch for parallel siblings"
+                    );
+
+                    // Send readiness notification if channel is available
+                    if let Some(ref tx) = self.ready_tx {
+                        let _ = tx.send(ReadyNotification {
+                            job_count: job_ids.len(),
+                            priority: Priority::Normal,
+                            sibling_group_id: child_nodes.first()
+                                .and_then(|n| n.sibling_group_id.clone()),
+                        });
+                    }
+                }
+                ExecutionMode::Sequential => {
+                    // Keep old sequential behavior for backward compatibility
+                    for child_node in child_nodes {
+                        self.create_job_for_node(
+                            dag_execution_id,
+                            &child_node.id,
+                            &dag_execution.topic,
+                            &dag_execution.execution_payload,
+                            outputs,
+                            dag_execution.priority,
+                            &dag_execution.created_by,
+                        )
+                        .await?;
+                    }
+                }
+                ExecutionMode::Limited(n) => {
+                    // Future enhancement: spawn n at a time, queue the rest
+                    // For now, fall back to sequential
+                    warn!(
+                        limit = n,
+                        "Limited execution mode not yet implemented, falling back to sequential"
+                    );
+                    for child_node in child_nodes {
+                        self.create_job_for_node(
+                            dag_execution_id,
+                            &child_node.id,
+                            &dag_execution.topic,
+                            &dag_execution.execution_payload,
+                            outputs,
+                            dag_execution.priority,
+                            &dag_execution.created_by,
+                        )
+                        .await?;
+                    }
+                }
             }
         }
 
@@ -156,7 +292,7 @@ impl DAGOrchestrator {
         info!(
             job_id = job.id,
             dag_execution_id = dag_execution_id,
-            node_execution_id = dag_node_execution_id = dag_node_execution_id,
+            node_execution_id = dag_node_execution_id,
             "Handling DAG job failure"
         );
 
@@ -195,6 +331,7 @@ impl DAGOrchestrator {
 
         Ok(())
     }
+
 
     async fn create_job_for_node(
         &self,
@@ -364,35 +501,39 @@ impl DAGOrchestrator {
         dag_execution_id: &str,
         node_id: &str,
     ) -> Result<(), String> {
-        let child_nodes = self.dag_template_repo.get_child_nodes(node_id).await?;
+        // Use iterative approach to avoid recursion issues in async
+        let mut to_process = vec![node_id.to_string()];
 
-        for child_node in child_nodes {
-            let node_execution = self
-                .dag_execution_repo
-                .get_node_execution_by_dag_and_node(dag_execution_id, &child_node.id)
-                .await?;
+        while let Some(current_node_id) = to_process.pop() {
+            let child_nodes = self.dag_template_repo.get_child_nodes(&current_node_id).await?;
 
-            // Only skip if not already in a terminal state
-            if node_execution.status == DAGNodeStatus::Pending
-                || node_execution.status == DAGNodeStatus::Waiting
-            {
-                self.dag_execution_repo
-                    .update_node_execution_status(
-                        &node_execution.id,
-                        DAGNodeStatus::Skipped,
-                        Some(NodeExecutionUpdate {
-                            outputs: None,
-                            error_message: Some("Parent node failed".to_string()),
-                            job_id: None,
-                            job_topic: None,
-                            inputs: None,
-                        }),
-                    )
+            for child_node in child_nodes {
+                let node_execution = self
+                    .dag_execution_repo
+                    .get_node_execution_by_dag_and_node(dag_execution_id, &child_node.id)
                     .await?;
 
-                // Recursively mark descendants
-                self.mark_descendants_as_skipped(dag_execution_id, &child_node.id)
-                    .await?;
+                // Only skip if not already in a terminal state
+                if node_execution.status == DAGNodeStatus::Pending
+                    || node_execution.status == DAGNodeStatus::Waiting
+                {
+                    self.dag_execution_repo
+                        .update_node_execution_status(
+                            &node_execution.id,
+                            DAGNodeStatus::Skipped,
+                            Some(NodeExecutionUpdate {
+                                outputs: None,
+                                error_message: Some("Parent node failed".to_string()),
+                                job_id: None,
+                                job_topic: None,
+                                inputs: None,
+                            }),
+                        )
+                        .await?;
+
+                    // Add child to processing queue (iterative instead of recursive)
+                    to_process.push(child_node.id);
+                }
             }
         }
 

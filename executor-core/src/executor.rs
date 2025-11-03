@@ -13,6 +13,7 @@ use crate::dag_trait::DAGOrchestratorTrait;
 use k8s_client::K8sClient;
 use types::{
     ExecutorConfig, JobExecutionSpec, JobOutputs, JobStatus, QueuedJob,
+    ReadyNotification, Priority,
 };
 
 /// Main job executor
@@ -24,6 +25,10 @@ pub struct JobExecutor {
     k8s_client: Arc<K8sClient>,
     dag_orchestrator: Option<Arc<dyn DAGOrchestratorTrait>>,
     running: Arc<tokio::sync::RwLock<bool>>,
+    /// Optional channel sender for event-driven notifications (if None, uses polling)
+    ready_tx: Option<tokio::sync::mpsc::UnboundedSender<ReadyNotification>>,
+    /// Semaphore to limit concurrent job executions
+    concurrency_limit: Arc<tokio::sync::Semaphore>,
 }
 
 impl JobExecutor {
@@ -36,6 +41,31 @@ impl JobExecutor {
         k8s_client: Arc<K8sClient>,
         dag_orchestrator: Option<Arc<dyn DAGOrchestratorTrait>>,
     ) -> Self {
+        Self::new_with_channel(
+            config,
+            job_repo,
+            image_repo,
+            history_repo,
+            k8s_client,
+            dag_orchestrator,
+            None, // No channel = polling mode
+        )
+    }
+
+    /// Create a new job executor with event-driven channel
+    pub fn new_with_channel(
+        config: ExecutorConfig,
+        job_repo: Arc<dyn JobQueueRepository>,
+        image_repo: Arc<dyn ImageRegistryRepository>,
+        history_repo: Arc<dyn JobExecutionHistoryRepository>,
+        k8s_client: Arc<K8sClient>,
+        dag_orchestrator: Option<Arc<dyn DAGOrchestratorTrait>>,
+        ready_tx: Option<tokio::sync::mpsc::UnboundedSender<ReadyNotification>>,
+    ) -> Self {
+        // Limit concurrent jobs (tune based on memory/CPU constraints)
+        // Default to 50 concurrent jobs, but allow config override
+        let max_concurrent = config.batch_size * 10; // Allow reasonable concurrency
+        
         Self {
             config,
             job_repo,
@@ -44,42 +74,82 @@ impl JobExecutor {
             k8s_client,
             dag_orchestrator,
             running: Arc::new(tokio::sync::RwLock::new(false)),
+            ready_tx,
+            concurrency_limit: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
         }
     }
 
-    /// Start the executor
+    /// Start the executor (supports both polling and event-driven modes)
     pub async fn start(&self) -> Result<()> {
         info!(
             instance_id = self.config.instance_id,
             topics = ?self.config.topics,
             poll_interval = self.config.poll_interval,
             batch_size = self.config.batch_size,
+            event_driven = self.ready_tx.is_some(),
             "Starting job executor"
         );
 
         *self.running.write().await = true;
         
-        let running = self.running.clone();
-        let config = self.config.clone();
-        let job_repo = self.job_repo.clone();
-        let image_repo = self.image_repo.clone();
-        let history_repo = self.history_repo.clone();
-        let k8s_client = Arc::clone(&self.k8s_client);
-        let dag_orchestrator = self.dag_orchestrator.clone();
+        // If we have a channel, we'll use event-driven mode (caller manages the loop)
+        // Otherwise, use polling mode
+        if self.ready_tx.is_none() {
+            let running = self.running.clone();
+            let config = self.config.clone();
+            let job_repo = self.job_repo.clone();
+            let image_repo = self.image_repo.clone();
+            let history_repo = self.history_repo.clone();
+            let k8s_client = Arc::clone(&self.k8s_client);
+            let dag_orchestrator = self.dag_orchestrator.clone();
 
-        tokio::spawn(async move {
-            Self::poll_loop(
-                running,
-                config,
-                job_repo,
-                image_repo,
-                history_repo,
-                k8s_client,
-                dag_orchestrator,
-            )
-            .await;
-        });
+            tokio::spawn(async move {
+                Self::poll_loop(
+                    running,
+                    config,
+                    job_repo,
+                    image_repo,
+                    history_repo,
+                    k8s_client,
+                    dag_orchestrator,
+                )
+                .await;
+            });
+        }
 
+        Ok(())
+    }
+
+    /// Start event-driven execution loop (call this instead of start() when using channels)
+    pub async fn run_event_loop(
+        &self,
+        mut ready_rx: tokio::sync::mpsc::UnboundedReceiver<ReadyNotification>,
+    ) -> Result<()> {
+        info!(
+            instance_id = self.config.instance_id,
+            "Starting event-driven executor loop"
+        );
+
+        *self.running.write().await = true;
+
+        loop {
+            tokio::select! {
+                Some(notification) = ready_rx.recv() => {
+                    self.handle_ready_jobs(notification).await;
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received shutdown signal");
+                    break;
+                }
+            }
+
+            // Check if we should stop
+            if !*self.running.read().await {
+                break;
+            }
+        }
+
+        *self.running.write().await = false;
         Ok(())
     }
 
@@ -177,6 +247,83 @@ impl JobExecutor {
         }
 
         Ok(())
+    }
+
+    /// Handle ready jobs notification (non-blocking, event-driven mode)
+    async fn handle_ready_jobs(&self, notification: ReadyNotification) {
+        info!(
+            job_count = notification.job_count,
+            priority = ?notification.priority,
+            sibling_group_id = ?notification.sibling_group_id,
+            "Handling ready jobs notification"
+        );
+
+        let topics = match Self::get_effective_topics(&self.config, &self.job_repo).await {
+            Ok(t) => t,
+            Err(e) => {
+                error!(error = ?e, "Failed to get effective topics");
+                return;
+            }
+        };
+
+        // Claim up to the notified job count, respecting batch_size limit
+        let limit = notification.job_count.min(self.config.batch_size);
+        
+        let jobs = match self.job_repo
+            .claim_jobs(&topics, limit, &self.config.instance_id)
+            .await
+        {
+            Ok(jobs) => jobs,
+            Err(e) => {
+                error!(error = ?e, "Failed to claim jobs");
+                return;
+            }
+        };
+
+        if !jobs.is_empty() {
+            info!(
+                count = jobs.len(),
+                topics = ?topics,
+                "Claimed jobs from queue via event notification"
+            );
+
+            // Spawn each job without blocking - they run independently
+            for job in jobs {
+                let permit = self.concurrency_limit.clone().acquire_owned().await;
+                if let Ok(permit) = permit {
+                    let job_repo = self.job_repo.clone();
+                    let image_repo = self.image_repo.clone();
+                    let history_repo = self.history_repo.clone();
+                    let k8s_client = Arc::clone(&self.k8s_client);
+                    let dag_orchestrator = self.dag_orchestrator.as_ref().map(|d| Arc::clone(d));
+                    let config = self.config.clone();
+
+                    tokio::spawn(async move {
+                        // Hold permit until job execution completes
+                        let _permit = permit;
+                        
+                        if let Err(e) = Self::execute_job(
+                            &job,
+                            &config,
+                            &job_repo,
+                            &image_repo,
+                            &history_repo,
+                            &k8s_client,
+                            dag_orchestrator.as_ref(),
+                        )
+                        .await
+                        {
+                            error!(error = ?e, job_id = job.id, "Failed to execute job");
+                        }
+                    });
+                } else {
+                    warn!(
+                        job_id = job.id,
+                        "Failed to acquire concurrency permit, job will be retried via polling"
+                    );
+                }
+            }
+        }
     }
 
     async fn get_effective_topics(

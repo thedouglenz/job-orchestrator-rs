@@ -15,6 +15,9 @@ pub trait Database: Send + Sync {
 #[async_trait]
 pub trait JobQueueRepository: Send + Sync {
     async fn enqueue_job(&self, request: &JobRequest) -> Result<String, String>;
+    /// Enqueue multiple jobs in a single database transaction
+    /// Returns the list of job IDs in the same order as the input requests
+    async fn enqueue_jobs_batch(&self, requests: &[JobRequest]) -> Result<Vec<String>, String>;
     async fn claim_jobs(&self, topics: &[String], batch_size: usize, executor_id: &str) -> Result<Vec<QueuedJob>, String>;
     async fn get_job(&self, job_id: &str) -> Result<QueuedJob, String>;
     async fn update_job_status(&self, update: &JobStatusUpdate) -> Result<(), String>;

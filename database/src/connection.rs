@@ -88,4 +88,15 @@ impl Database {
         info!("Closing database connection pool");
         // Pool will close when dropped
     }
+
+    /// Execute raw SQL (useful for migrations)
+    pub async fn execute_sql(&self, sql: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let client = self.pool.get().await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
+        
+        client.batch_execute(sql).await
+            .map_err(|e| format!("Failed to execute SQL: {}", e))?;
+        
+        Ok(())
+    }
 }

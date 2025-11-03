@@ -1,0 +1,73 @@
+{{- if .Values.executor.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rust-executor.fullname" . }}-executor
+  labels:
+    {{- include "rust-executor.executor.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.executor.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "rust-executor.executor.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "rust-executor.executor.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "rust-executor.serviceAccountName" . }}
+      {{- with .Values.executor.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: executor
+          image: "{{ .Values.executor.image.repository }}:{{ .Values.executor.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.executor.image.pullPolicy | default "IfNotPresent" }}
+          env:
+            # Database connection
+            - name: DATABASE_URL
+              value: {{ include "rust-executor.database.url" . | trim | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rust-executor.database.secretName" . | trim }}
+                  key: {{ include "rust-executor.database.secretKey" . | trim }}
+            # Instance identification
+            - name: EXECUTOR_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: {{ include "rust-executor.fullname" . }}
+          resources:
+            {{- toYaml .Values.executor.resources | nindent 12 }}
+          # Health check (if implemented in the executor)
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health
+          #     port: 8080
+          #   initialDelaySeconds: 30
+          #   periodSeconds: 10
+          # readinessProbe:
+          #   httpGet:
+          #     path: /ready
+          #     port: 8080
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 5
+      {{- with .Values.executor.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.executor.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.executor.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

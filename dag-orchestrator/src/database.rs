@@ -2,16 +2,8 @@ use async_trait::async_trait;
 use types::{JobRequest, QueuedJob, JobOutputs};
 use std::collections::HashMap;
 
-/// Job queue repository trait (duplicated here to avoid circular dependency)
-#[async_trait]
-pub trait JobQueueRepository: Send + Sync {
-    async fn enqueue_job(&self, request: &JobRequest) -> Result<String, String>;
-    async fn claim_jobs(&self, topics: &[String], batch_size: usize, executor_id: &str) -> Result<Vec<QueuedJob>, String>;
-    async fn get_job(&self, job_id: &str) -> Result<QueuedJob, String>;
-    async fn update_job_status(&self, update: &types::JobStatusUpdate) -> Result<(), String>;
-    async fn requeue_job(&self, job_id: &str) -> Result<(), String>;
-    async fn get_distinct_topics(&self) -> Result<Vec<String>, String>;
-}
+// Use JobQueueRepository from executor-core to avoid duplication
+pub use executor_core::database::JobQueueRepository;
 
 /// DAG execution repository trait
 #[async_trait]
@@ -84,6 +76,12 @@ pub struct DAGNode {
     pub resource_overrides: Option<types::image::PartialResourceRequirements>,
     pub max_retries: i32,
     pub input_mapping: Option<HashMap<String, InputMappingSpec>>,
+    /// Optional UUID identifying a group of sibling nodes that should be executed together
+    pub sibling_group_id: Option<String>,
+    /// Execution mode for this node's siblings (defaults to Parallel)
+    pub execution_mode: types::ExecutionMode,
+    /// Maximum number of siblings to execute in parallel (only used for Limited mode)
+    pub max_parallel_siblings: Option<i32>,
 }
 
 #[derive(Debug, Clone)]

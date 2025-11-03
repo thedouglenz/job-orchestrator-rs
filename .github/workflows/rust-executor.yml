@@ -1,0 +1,152 @@
+name: Build and Push Rust Executor
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - 'feat/**'
+    paths:
+      - 'src/**'
+      - 'executor-core/**'
+      - 'dag-orchestrator/**'
+      - 'database/**'
+      - 'types/**'
+      - 'k8s-client/**'
+      - 'Dockerfile'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/rust-executor.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'executor-core/**'
+      - 'dag-orchestrator/**'
+      - 'database/**'
+      - 'types/**'
+      - 'k8s-client/**'
+      - 'Dockerfile'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+env:
+  IMAGE_NAME: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/job-orchestrator/rust-executor
+  REGISTRY: us-docker.pkg.dev
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy lint
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Build
+        run: cargo build --release --bin job-orchestrator
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      semantic_version: ${{ steps.semver.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine semantic version
+        id: semver
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "base_version=$VERSION" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+          else
+            BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            echo "version=${VERSION}-${BRANCH_NAME}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker us-docker.pkg.dev
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.semver.outputs.version }}
+            type=raw,value=latest,enable=${{ steps.semver.outputs.is_main == 'true' }}
+            type=raw,value=${{ steps.semver.outputs.version }},enable=${{ steps.semver.outputs.is_main == 'false' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+          platforms: linux/amd64,linux/arm64
+
+      - name: Output image details
+        run: |
+          echo "Image pushed:"
+          echo "  Tags: ${{ steps.meta.outputs.tags }}"
+          echo "  Version: ${{ steps.semver.outputs.version }}"
+          echo "  Branch: ${{ github.ref_name }}"

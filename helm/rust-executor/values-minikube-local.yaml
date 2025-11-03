@@ -1,0 +1,49 @@
+# Minikube-specific configuration using EXISTING PostgreSQL
+# This uses the existing job-orchestrator-postgresql database
+
+# Executor Service
+executor:
+  enabled: true
+  replicaCount: 1
+  
+  image:
+    # Use GCP Artifact Registry image (override in secrets-minikube.yaml)
+    repository: us-docker.pkg.dev/sonic-glazing-475623-j4/job-orchestrator/rust-executor
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  
+  imagePullSecrets:
+    - name: gcr-secret
+  
+  # Executor configuration
+  topics: "ALL"  # Process all topics for testing
+  batchSize: 3
+  pollInterval: 5000
+  eventDriven: true
+  kubernetesNamespace: "default"
+  
+  env: {}
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Use existing PostgreSQL (don't deploy new one)
+postgresql:
+  enabled: false
+
+# Connect to existing database
+externalDatabase:
+  host: job-orchestrator-postgresql  # Existing service name
+  port: 5432
+  database: jobqueue
+  username: jobqueue
+  existingSecret: job-orchestrator-postgresql
+  existingSecretPasswordKey: password
+
+# Logging
+logLevel: debug

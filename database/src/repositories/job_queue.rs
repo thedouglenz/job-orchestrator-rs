@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use postgres_types::Json;
 use executor_core::database::JobQueueRepository;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,42 +25,77 @@ impl JobQueueRepository for PostgresJobQueueRepository {
                 topic, image_id, job_name, command, args,
                 environment_variables, resource_overrides, priority,
                 max_retries, created_by, labels, inputs
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ) VALUES (
+                $1,
+                $2::uuid,
+                $3,
+                $4::text[],
+                $5::text[],
+                $6::jsonb,
+                $7::jsonb,
+                $8,
+                $9,
+                $10,
+                $11::jsonb,
+                $12::jsonb
+            )
             RETURNING id
         "#;
 
-        let env_vars_json = request.environment_variables.as_ref()
-            .map(|v| serde_json::to_string(v))
-            .transpose()
-            .map_err(|e| format!("Failed to serialize env vars: {}", e))?;
+        // Prepare JSONB parameters using postgres Json wrapper
+        let env_vars_json: Option<Json<serde_json::Value>> = request
+            .environment_variables
+            .as_ref()
+            .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
 
-        let resource_overrides_json = request.resource_overrides.as_ref()
-            .map(|v| serde_json::to_string(v))
-            .transpose()
-            .map_err(|e| format!("Failed to serialize resource overrides: {}", e))?;
+        let resource_overrides_json: Option<Json<serde_json::Value>> = request
+            .resource_overrides
+            .as_ref()
+            .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
 
-        let labels_json = request.labels.as_ref()
-            .map(|v| serde_json::to_string(v))
-            .transpose()
-            .map_err(|e| format!("Failed to serialize labels: {}", e))?;
+        let labels_json: Option<Json<serde_json::Value>> = request
+            .labels
+            .as_ref()
+            .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
 
-        let inputs_json = request.inputs.as_ref()
-            .map(|v| serde_json::to_string(v))
-            .transpose()
-            .map_err(|e| format!("Failed to serialize inputs: {}", e))?;
+        let inputs_json: Option<Json<serde_json::Value>> = request
+            .inputs
+            .as_ref()
+            .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
 
+        // Parse image_id to UUID for PostgreSQL
+        let image_uuid: uuid::Uuid = request.image_id.parse()
+            .map_err(|e| format!("Invalid image_id UUID: {}", e))?;
+
+        // For PostgreSQL TEXT[] arrays, handle Option<Vec<String>> properly
+        // We need to pass Option<&[&str]> or handle None separately
         let client = self.db.pool.get().await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
+
+        // Handle nullable arrays - tokio-postgres needs Option<&[impl ToSql]>
+        // If None, pass None::<Vec<String>>, otherwise pass Some(&[&str])
+        // Prepare arrays as Option<&[&str]> to satisfy tokio-postgres array encoder
+        let cmd_vec: Option<Vec<&str>> = request
+            .command
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        let args_vec: Option<Vec<&str>> = request
+            .args
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+
+        let cmd_param: Option<&[&str]> = cmd_vec.as_deref();
+        let args_param: Option<&[&str]> = args_vec.as_deref();
 
         let rows = client
             .query(
                 query,
                 &[
                     &request.topic,
-                    &request.image_id,
+                    &image_uuid,
                     &request.job_name,
-                    &request.command,
-                    &request.args,
+                    &cmd_param,
+                    &args_param,
                     &env_vars_json,
                     &resource_overrides_json,
                     &(request.priority.unwrap_or(0) as i32),
@@ -70,13 +106,123 @@ impl JobQueueRepository for PostgresJobQueueRepository {
                 ],
             )
             .await
-            .map_err(|e| format!("Failed to enqueue job: {}", e))?;
+            .map_err(|e| format!("Failed to enqueue job: {:?}", e))?;
 
         if rows.is_empty() {
             return Err("No job ID returned".to_string());
         }
 
         Ok(rows[0].get::<_, uuid::Uuid>("id").to_string())
+    }
+
+    async fn enqueue_jobs_batch(&self, requests: &[JobRequest]) -> Result<Vec<String>, String> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut client = self.db.pool.get().await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
+
+        // Use a transaction for atomicity
+        let transaction = client.transaction().await
+            .map_err(|e| format!("Failed to start transaction: {}", e))?;
+
+        let mut job_ids = Vec::with_capacity(requests.len());
+
+        // Insert each job in the transaction
+        for request in requests {
+            let query = r#"
+                INSERT INTO job_queue (
+                    topic, image_id, job_name, command, args,
+                    environment_variables, resource_overrides, priority,
+                    max_retries, created_by, labels, inputs
+                ) VALUES (
+                    $1,
+                    $2::uuid,
+                    $3,
+                    $4::text[],
+                    $5::text[],
+                    $6::jsonb,
+                    $7::jsonb,
+                    $8,
+                    $9,
+                    $10,
+                    $11::jsonb,
+                    $12::jsonb
+                )
+                RETURNING id
+            "#;
+
+            let env_vars_json: Option<Json<serde_json::Value>> = request
+                .environment_variables
+                .as_ref()
+                .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
+
+            let resource_overrides_json: Option<Json<serde_json::Value>> = request
+                .resource_overrides
+                .as_ref()
+                .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
+
+            let labels_json: Option<Json<serde_json::Value>> = request
+                .labels
+                .as_ref()
+                .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
+
+            let inputs_json: Option<Json<serde_json::Value>> = request
+                .inputs
+                .as_ref()
+                .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
+
+            // Parse image_id
+            let image_uuid: uuid::Uuid = request.image_id.parse()
+                .map_err(|e| format!("Invalid image_id UUID: {}", e))?;
+
+            // Convert arrays to Option<&[&str]>
+            let cmd_vec: Option<Vec<&str>> = request
+                .command
+                .as_ref()
+                .map(|v| v.iter().map(|s| s.as_str()).collect());
+            let args_vec: Option<Vec<&str>> = request
+                .args
+                .as_ref()
+                .map(|v| v.iter().map(|s| s.as_str()).collect());
+
+            let cmd_param: Option<&[&str]> = cmd_vec.as_deref();
+            let args_param: Option<&[&str]> = args_vec.as_deref();
+
+            let rows = transaction
+                .query(
+                    query,
+                    &[
+                        &request.topic,
+                        &image_uuid,
+                        &request.job_name,
+                        &cmd_param,
+                        &args_param,
+                        &env_vars_json,
+                        &resource_overrides_json,
+                        &(request.priority.unwrap_or(0) as i32),
+                        &(request.max_retries.unwrap_or(3) as i32),
+                        &request.created_by,
+                        &labels_json,
+                        &inputs_json,
+                    ],
+                )
+                .await
+                .map_err(|e| format!("Failed to enqueue job in batch: {}", e))?;
+
+            if rows.is_empty() {
+                return Err("No job ID returned".to_string());
+            }
+
+            job_ids.push(rows[0].get::<_, uuid::Uuid>("id").to_string());
+        }
+
+        // Commit the transaction
+        transaction.commit().await
+            .map_err(|e| format!("Failed to commit batch transaction: {}", e))?;
+
+        Ok(job_ids)
     }
 
     async fn claim_jobs(

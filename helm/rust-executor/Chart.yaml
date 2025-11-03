@@ -1,0 +1,17 @@
+apiVersion: v2
+name: rust-executor
+description: Rust-based Kubernetes Job Executor with PostgreSQL-backed queue
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - job-executor
+  - kubernetes
+  - rust
+  - postgresql
+  - queue
+dependencies:
+  - name: postgresql
+    version: "15.5.x"
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled

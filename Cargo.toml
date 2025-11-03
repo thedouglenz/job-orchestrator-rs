@@ -22,8 +22,20 @@ executor-core = { path = "executor-core" }
 types = { path = "types" }
 k8s-client = { path = "k8s-client" }
 database = { path = "database" }
+dag-orchestrator = { path = "dag-orchestrator" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["full", "signal"] }
 hostname = "0.4"
 async-trait = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["async_tokio"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4"] }
+serde_json = "1.0"
+types = { path = "types" }
+executor-core = { path = "executor-core" }
+database = { path = "database" }
+testcontainers = "0.15"

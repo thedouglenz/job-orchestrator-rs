@@ -1,0 +1,95 @@
+# Default values for rust-executor
+# This is a YAML-formatted file.
+
+# Global settings
+nameOverride: ""
+fullnameOverride: ""
+
+# Application environment
+logLevel: info
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# RBAC
+rbac:
+  create: true
+
+# Executor Service
+executor:
+  enabled: true
+  replicaCount: 2
+  
+  image:
+    repository: us-docker.pkg.dev/YOUR_PROJECT/job-orchestrator/rust-executor
+    pullPolicy: IfNotPresent
+    tag: ""  # Defaults to chart appVersion
+  
+  imagePullSecrets: []
+  
+  # Executor configuration
+  topics: "default"  # Comma-separated list or "ALL"
+  batchSize: 5
+  pollInterval: 5000  # milliseconds (only used in polling mode)
+  eventDriven: true  # Enable event-driven mode (recommended)
+  kubernetesNamespace: "default"  # Namespace where jobs will be created
+  
+  # Additional environment variables
+  env: {}
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# PostgreSQL (Bitnami chart)
+postgresql:
+  enabled: true
+  
+  auth:
+    username: jobqueue
+    password: changeme  # CHANGE THIS IN PRODUCTION
+    database: jobqueue
+  
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""  # Use default storage class
+    
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+    
+    initdb:
+      scripts:
+        init.sql: |
+          -- Grant all privileges to jobqueue user
+          GRANT ALL PRIVILEGES ON DATABASE jobqueue TO jobqueue;
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO jobqueue;
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO jobqueue;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO jobqueue;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO jobqueue;
+
+# External database (if postgresql.enabled is false)
+externalDatabase:
+  host: postgres.example.com
+  port: 5432
+  database: jobqueue
+  username: jobqueue
+  existingSecret: ""  # Name of existing secret with password
+  existingSecretPasswordKey: password

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rust-executor.fullname" . }}
+  labels:
+    {{- include "rust-executor.labels" . | nindent 4 }}
+data:
+  DATABASE_HOST: {{ include "rust-executor.database.host" . | quote }}
+  DATABASE_PORT: {{ include "rust-executor.database.port" . | quote }}
+  DATABASE_NAME: {{ include "rust-executor.database.name" . | quote }}
+  DATABASE_USER: {{ include "rust-executor.database.username" . | quote }}
+  LOG_LEVEL: {{ .Values.logLevel | default "info" | quote }}
+  RUST_LOG: {{ .Values.logLevel | default "info" | quote }}
+  {{- if .Values.executor.enabled }}
+  EXECUTOR_TOPICS: {{ .Values.executor.topics | default "default" | quote }}
+  EXECUTOR_BATCH_SIZE: {{ .Values.executor.batchSize | default 5 | quote }}
+  EXECUTOR_POLL_INTERVAL: {{ .Values.executor.pollInterval | default 5000 | quote }}
+  EXECUTOR_EVENT_DRIVEN: {{ .Values.executor.eventDriven | default true | quote }}
+  K8S_NAMESPACE: {{ .Values.executor.kubernetesNamespace | default .Release.Namespace | quote }}
+  K8S_IN_CLUSTER: "true"
+  {{- if .Values.executor.env }}
+  {{- range $key, $value := .Values.executor.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}
+  {{- end }}

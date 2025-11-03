@@ -1,0 +1,40 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "rust-executor.fullname" . }}
+  labels:
+    {{- include "rust-executor.labels" . | nindent 4 }}
+rules:
+  # Allow executor to create, get, list, watch, delete jobs
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Allow executor to read job status
+  - apiGroups: ["batch"]
+    resources: ["jobs/status"]
+    verbs: ["get", "list", "watch"]
+  # Allow executor to get, list, watch pods for job monitoring
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Allow executor to read pod logs
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "rust-executor.fullname" . }}
+  labels:
+    {{- include "rust-executor.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "rust-executor.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "rust-executor.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

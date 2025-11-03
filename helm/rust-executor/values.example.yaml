@@ -1,0 +1,51 @@
+# Example values file for rust-executor
+# Copy this to values.yaml or use with -f flag
+
+# Use a custom image
+executor:
+  image:
+    repository: us-docker.pkg.dev/my-project/job-orchestrator/rust-executor
+    tag: v0.1.0
+  
+  # Enable event-driven mode (recommended)
+  eventDriven: true
+  
+  # Configure topics
+  topics: "default,high-priority"
+  # Or use "ALL" to process all topics
+  # topics: "ALL"
+  
+  # Batch size for job claiming
+  batchSize: 10
+  
+  # Namespace where jobs will be created
+  kubernetesNamespace: "default"
+  
+  # Resource limits
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+# Use external database
+postgresql:
+  enabled: false
+
+externalDatabase:
+  host: postgres.example.com
+  port: 5432
+  database: jobqueue
+  username: jobqueue
+  existingSecret: postgres-secret
+  existingSecretPasswordKey: password
+
+# Or use included PostgreSQL
+# postgresql:
+#   enabled: true
+#   auth:
+#     username: jobqueue
+#     password: secure-password-here
+#     database: jobqueue
