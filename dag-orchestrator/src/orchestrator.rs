@@ -1,11 +1,9 @@
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::database::{
-    DAGExecution, DAGExecutionRepository, DAGExecutionStats, DAGNode, DAGNodeExecution,
-    DAGNodeStatus, DAGStatus, DAGTemplateRepository, JobQueueRepository, NodeExecutionUpdate,
+    DAGExecutionRepository, DAGNodeStatus, DAGStatus, DAGTemplateRepository, JobQueueRepository, NodeExecutionUpdate,
 };
 
 use types::{ExecutionMode, JobOutputs, JobRequest, Priority, QueuedJob, ReadyNotification};

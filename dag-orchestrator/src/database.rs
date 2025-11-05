@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
-use types::{JobOutputs, JobRequest, QueuedJob};
+use types::JobOutputs;
 
 // Use JobQueueRepository from executor-core to avoid duplication
 pub use executor_core::database::JobQueueRepository;

@@ -17,8 +17,6 @@ use types::{JobExecutionSpec, K8sJobCondition, K8sJobStatus};
 /// Kubernetes client for managing job orchestration
 pub struct K8sClient {
     client: Client,
-    jobs_api: Api<Job>,
-    pods_api: Api<k8s_openapi::api::core::v1::Pod>,
 }
 
 impl K8sClient {
@@ -42,11 +40,7 @@ impl K8sClient {
         let client = Client::try_from(config)
             .map_err(|e| KubernetesError::ConfigError(format!("Failed to create client: {}", e)))?;
 
-        Ok(Self {
-            jobs_api: Api::default_namespaced(client.clone()),
-            pods_api: Api::default_namespaced(client.clone()),
-            client,
-        })
+        Ok(Self { client })
     }
 
     /// Create a Kubernetes job from a JobExecutionSpec

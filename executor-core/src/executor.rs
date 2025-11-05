@@ -11,7 +11,7 @@ use crate::database::{
 use crate::error::{ExecutorError, Result};
 use k8s_client::K8sClient;
 use types::{
-    ExecutorConfig, JobExecutionSpec, JobOutputs, JobStatus, Priority, QueuedJob, ReadyNotification,
+    ExecutorConfig, JobExecutionSpec, JobOutputs, JobStatus, QueuedJob, ReadyNotification,
 };
 
 /// Main job executor

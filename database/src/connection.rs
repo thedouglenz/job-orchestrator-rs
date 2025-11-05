@@ -1,4 +1,4 @@
-use deadpool_postgres::{Config, Pool, Runtime};
+use deadpool_postgres::{Pool, Runtime};
 use tokio_postgres::NoTls;
 use tracing::{error, info};
 
