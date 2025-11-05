@@ -1,10 +1,10 @@
-use executor_core::JobExecutor;
+use database;
 use executor_core::database::{
-    JobExecutionHistoryRepository, JobQueueRepository, ImageRegistryRepository,
+    ImageRegistryRepository, JobExecutionHistoryRepository, JobQueueRepository,
 };
 use executor_core::error::ExecutorError;
+use executor_core::JobExecutor;
 use k8s_client::K8sClient;
-use database;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use types::ReadyNotification;
@@ -41,12 +41,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(5),
         kubernetes_namespace: std::env::var("K8S_NAMESPACE")
             .unwrap_or_else(|_| "default".to_string()),
-        instance_id: std::env::var("EXECUTOR_INSTANCE_ID")
-            .unwrap_or_else(|_| {
-                hostname::get()
-                    .map(|h| format!("executor-{}", h.to_string_lossy()))
-                    .unwrap_or_else(|_| "executor-unknown".to_string())
-            }),
+        instance_id: std::env::var("EXECUTOR_INSTANCE_ID").unwrap_or_else(|_| {
+            hostname::get()
+                .map(|h| format!("executor-{}", h.to_string_lossy()))
+                .unwrap_or_else(|_| "executor-unknown".to_string())
+        }),
     };
 
     info!(?config, "Executor configuration loaded");
@@ -65,16 +64,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize repositories
-    let job_repo: Arc<dyn JobQueueRepository> = Arc::new(database::PostgresJobQueueRepository::new(Arc::clone(&db)));
-    let image_repo: Arc<dyn ImageRegistryRepository> = Arc::new(database::PostgresImageRegistryRepository::new(Arc::clone(&db)));
-    let history_repo: Arc<dyn JobExecutionHistoryRepository> =
-        Arc::new(database::PostgresJobExecutionHistoryRepository::new(Arc::clone(&db)));
+    let job_repo: Arc<dyn JobQueueRepository> =
+        Arc::new(database::PostgresJobQueueRepository::new(Arc::clone(&db)));
+    let image_repo: Arc<dyn ImageRegistryRepository> = Arc::new(
+        database::PostgresImageRegistryRepository::new(Arc::clone(&db)),
+    );
+    let history_repo: Arc<dyn JobExecutionHistoryRepository> = Arc::new(
+        database::PostgresJobExecutionHistoryRepository::new(Arc::clone(&db)),
+    );
 
     // Initialize DAG repositories
-    let dag_execution_repo: Arc<dyn dag_orchestrator::database::DAGExecutionRepository> = 
-        Arc::new(database::PostgresDAGExecutionRepository::new(Arc::clone(&db)));
-    let dag_template_repo: Arc<dyn dag_orchestrator::database::DAGTemplateRepository> = 
-        Arc::new(database::PostgresDAGTemplateRepository::new(Arc::clone(&db)));
+    let dag_execution_repo: Arc<dyn dag_orchestrator::database::DAGExecutionRepository> = Arc::new(
+        database::PostgresDAGExecutionRepository::new(Arc::clone(&db)),
+    );
+    let dag_template_repo: Arc<dyn dag_orchestrator::database::DAGTemplateRepository> = Arc::new(
+        database::PostgresDAGTemplateRepository::new(Arc::clone(&db)),
+    );
 
     info!("Database connection established");
 
@@ -88,10 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set up event-driven execution if enabled
     if use_event_driven {
         info!("Starting in event-driven mode");
-        
+
         // Create channel for readiness notifications
         let (ready_tx, ready_rx) = tokio::sync::mpsc::unbounded_channel::<ReadyNotification>();
-        
+
         // Create DAG orchestrator with channel for event-driven notifications
         let dag_orchestrator = Arc::new(dag_orchestrator::DAGOrchestrator::new_with_channel(
             dag_execution_repo.clone(),
@@ -99,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             job_repo.clone(),
             Some(ready_tx.clone()),
         ));
-        
+
         // Create executor with DAG orchestrator
         let executor = JobExecutor::new_with_channel(
             config.clone(),
@@ -107,7 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             image_repo.clone(),
             history_repo.clone(),
             k8s_client.clone(),
-            Some(dag_orchestrator.clone() as Arc<dyn executor_core::dag_trait::DAGOrchestratorTrait>),
+            Some(
+                dag_orchestrator.clone() as Arc<dyn executor_core::dag_trait::DAGOrchestratorTrait>
+            ),
             Some(ready_tx.clone()),
         );
 
@@ -117,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             // Small delay to let everything initialize
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            
+
             // Check for pending jobs
             match job_repo_bootstrap.get_distinct_topics().await {
                 Ok(topics) => {
@@ -140,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let executor_arc: Arc<JobExecutor> = Arc::new(executor);
         let executor_for_shutdown = Arc::clone(&executor_arc);
         let db_for_shutdown = Arc::clone(&db);
-        
+
         let executor_start = Arc::clone(&executor_arc);
         let executor_handle = tokio::spawn(async move {
             if let Err(e) = executor_start.run_event_loop(ready_rx).await {
@@ -148,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
         });
-        
+
         tokio::select! {
             _ = executor_handle => {}
             _ = tokio::signal::ctrl_c() => {
@@ -159,14 +166,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         info!("Starting in polling mode (legacy)");
-        
+
         // Create DAG orchestrator (no channel for polling mode)
         let dag_orchestrator = Arc::new(dag_orchestrator::DAGOrchestrator::new(
             dag_execution_repo.clone(),
             dag_template_repo.clone(),
             job_repo.clone(),
         ));
-        
+
         // Create executor in polling mode
         let executor = JobExecutor::new(
             config,
@@ -174,14 +181,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             image_repo,
             history_repo,
             k8s_client,
-            Some(dag_orchestrator.clone() as Arc<dyn executor_core::dag_trait::DAGOrchestratorTrait>),
+            Some(
+                dag_orchestrator.clone() as Arc<dyn executor_core::dag_trait::DAGOrchestratorTrait>
+            ),
         );
 
         // Start executor
         let executor_arc: Arc<JobExecutor> = Arc::new(executor);
         let executor_for_shutdown = Arc::clone(&executor_arc);
         let db_for_shutdown: Arc<database::Database> = Arc::clone(&db);
-        
+
         let executor_start = Arc::clone(&executor_arc);
         let executor_handle = tokio::spawn(async move {
             if let Err(e) = executor_start.start().await {
@@ -189,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
         });
-        
+
         tokio::select! {
             _ = executor_handle => {}
             _ = tokio::signal::ctrl_c() => {

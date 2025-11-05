@@ -1,15 +1,14 @@
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-use async_trait::async_trait;
 
 use crate::database::{
-    DAGExecutionRepository, DAGTemplateRepository, DAGExecution, DAGNodeExecution,
-    DAGStatus, DAGNodeStatus, DAGNode, NodeExecutionUpdate, DAGExecutionStats,
-    JobQueueRepository,
+    DAGExecution, DAGExecutionRepository, DAGExecutionStats, DAGNode, DAGNodeExecution,
+    DAGNodeStatus, DAGStatus, DAGTemplateRepository, JobQueueRepository, NodeExecutionUpdate,
 };
 
-use types::{QueuedJob, JobOutputs, JobRequest, ReadyNotification, Priority, ExecutionMode};
+use types::{ExecutionMode, JobOutputs, JobRequest, Priority, QueuedJob, ReadyNotification};
 
 /// DAG Orchestrator handles DAG execution orchestration logic
 pub struct DAGOrchestrator {
@@ -57,7 +56,10 @@ impl DAGOrchestrator {
         let dag_execution_id = match &job.dag_execution_id {
             Some(id) => id,
             None => {
-                warn!(job_id = job.id, "Job missing DAG context in handle_job_completion");
+                warn!(
+                    job_id = job.id,
+                    "Job missing DAG context in handle_job_completion"
+                );
                 return Ok(());
             }
         };
@@ -104,10 +106,7 @@ impl DAGOrchestrator {
             .await?;
 
         // Get child nodes of this node
-        let child_nodes = self
-            .dag_template_repo
-            .get_child_nodes(&node.id)
-            .await?;
+        let child_nodes = self.dag_template_repo.get_child_nodes(&node.id).await?;
 
         if !child_nodes.is_empty() {
             info!(
@@ -123,7 +122,8 @@ impl DAGOrchestrator {
                 .await?;
 
             // Check execution mode (default to Parallel if not specified)
-            let execution_mode = child_nodes.first()
+            let execution_mode = child_nodes
+                .first()
                 .map(|n| n.execution_mode)
                 .unwrap_or(ExecutionMode::Parallel);
 
@@ -132,10 +132,13 @@ impl DAGOrchestrator {
                 ExecutionMode::Parallel => "parallel",
                 ExecutionMode::Limited(n) => {
                     // Use a temporary string for limited mode
-                    return Err(format!("Limited execution mode ({}) not yet fully implemented", n));
+                    return Err(format!(
+                        "Limited execution mode ({}) not yet fully implemented",
+                        n
+                    ));
                 }
             };
-            
+
             info!(
                 child_count = child_nodes.len(),
                 execution_mode = execution_mode_str,
@@ -147,10 +150,10 @@ impl DAGOrchestrator {
                     // Batch create all sibling jobs
                     // First, prepare all job requests (need async context)
                     let mut job_requests = Vec::with_capacity(child_nodes.len());
-                    
+
                     for child_node in &child_nodes {
                         let node = self.dag_template_repo.get_node(&child_node.id).await?;
-                        
+
                         let inputs = self.resolve_node_inputs(
                             child_node.input_mapping.as_ref(),
                             &dag_execution.execution_payload,
@@ -174,7 +177,8 @@ impl DAGOrchestrator {
                     }
 
                     // Create all jobs in a single batch transaction
-                    let job_ids = self.job_repo
+                    let job_ids = self
+                        .job_repo
                         .enqueue_jobs_batch(&job_requests)
                         .await
                         .map_err(|e| format!("Failed to enqueue jobs batch: {}", e))?;
@@ -218,7 +222,8 @@ impl DAGOrchestrator {
                         let _ = tx.send(ReadyNotification {
                             job_count: job_ids.len(),
                             priority: Priority::Normal,
-                            sibling_group_id: child_nodes.first()
+                            sibling_group_id: child_nodes
+                                .first()
                                 .and_then(|n| n.sibling_group_id.clone()),
                         });
                     }
@@ -276,7 +281,10 @@ impl DAGOrchestrator {
         let dag_execution_id = match &job.dag_execution_id {
             Some(id) => id,
             None => {
-                warn!(job_id = job.id, "Job missing DAG context in handle_job_failure");
+                warn!(
+                    job_id = job.id,
+                    "Job missing DAG context in handle_job_failure"
+                );
                 return Ok(());
             }
         };
@@ -316,7 +324,11 @@ impl DAGOrchestrator {
             .update_execution_status(
                 dag_execution_id,
                 DAGStatus::Failed,
-                Some(&format!("Node {} failed: {}", job.job_name.as_ref().unwrap_or(&job.id), error_message)),
+                Some(&format!(
+                    "Node {} failed: {}",
+                    job.job_name.as_ref().unwrap_or(&job.id),
+                    error_message
+                )),
             )
             .await?;
 
@@ -331,7 +343,6 @@ impl DAGOrchestrator {
 
         Ok(())
     }
-
 
     async fn create_job_for_node(
         &self,
@@ -431,7 +442,8 @@ impl DAGOrchestrator {
                                 if let Some(output_value) = outputs.get(key) {
                                     // Extract the value from the JobIO structure if needed
                                     // For now, just use the value directly
-                                    resolved_inputs.insert(input_name.clone(), output_value.clone());
+                                    resolved_inputs
+                                        .insert(input_name.clone(), output_value.clone());
                                 }
                             }
                         }
@@ -455,8 +467,7 @@ impl DAGOrchestrator {
             .await?;
 
         // Check if all nodes are in terminal states
-        let total_terminal =
-            stats.completed_nodes + stats.failed_nodes + stats.skipped_nodes;
+        let total_terminal = stats.completed_nodes + stats.failed_nodes + stats.skipped_nodes;
 
         if total_terminal == stats.total_nodes {
             // DAG is done
@@ -475,10 +486,7 @@ impl DAGOrchestrator {
                     .await?;
                 info!(dag_execution_id, "DAG execution completed successfully");
             }
-        } else if stats.running_nodes > 0
-            || stats.pending_nodes > 0
-            || stats.waiting_nodes > 0
-        {
+        } else if stats.running_nodes > 0 || stats.pending_nodes > 0 || stats.waiting_nodes > 0 {
             // Update to running if not already
             let execution = self
                 .dag_execution_repo
@@ -505,7 +513,10 @@ impl DAGOrchestrator {
         let mut to_process = vec![node_id.to_string()];
 
         while let Some(current_node_id) = to_process.pop() {
-            let child_nodes = self.dag_template_repo.get_child_nodes(&current_node_id).await?;
+            let child_nodes = self
+                .dag_template_repo
+                .get_child_nodes(&current_node_id)
+                .await?;
 
             for child_node in child_nodes {
                 let node_execution = self

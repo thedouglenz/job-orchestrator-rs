@@ -1,7 +1,7 @@
 // Test data fixtures
 
-use types::{QueuedJob, JobStatus, JobInputs};
 use chrono::Utc;
+use types::{JobInputs, JobStatus, QueuedJob};
 use uuid::Uuid;
 
 pub fn create_simple_job() -> QueuedJob {
@@ -41,7 +41,7 @@ pub fn create_job_with_inputs() -> QueuedJob {
     let mut inputs = JobInputs::new();
     inputs.insert("input1".to_string(), serde_json::json!("value1"));
     inputs.insert("input2".to_string(), serde_json::json!(42));
-    
+
     let mut job = create_simple_job();
     job.inputs = Some(inputs);
     job
@@ -71,4 +71,3 @@ pub fn create_failing_job() -> QueuedJob {
     job.command = Some(vec!["false".to_string()]); // Command that fails
     job
 }
-

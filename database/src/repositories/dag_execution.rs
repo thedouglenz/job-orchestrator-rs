@@ -6,8 +6,8 @@ use types::io::{JobInputs, JobOutputs};
 
 use crate::connection::Database;
 use dag_orchestrator::database::{
-    DAGExecution, DAGExecutionRepository, DAGExecutionStats, DAGNodeExecution,
-    DAGNodeStatus, DAGStatus, NodeExecutionUpdate,
+    DAGExecution, DAGExecutionRepository, DAGExecutionStats, DAGNodeExecution, DAGNodeStatus,
+    DAGStatus, NodeExecutionUpdate,
 };
 
 pub struct PostgresDAGExecutionRepository {
@@ -27,9 +27,12 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
         dag_execution_id: &str,
         _include_nodes: bool,
     ) -> Result<DAGExecution, String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let query = "SELECT * FROM dag_executions WHERE id = $1";
         let row = client
@@ -44,9 +47,12 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
         &self,
         node_execution_id: &str,
     ) -> Result<DAGNodeExecution, String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let query = "SELECT * FROM dag_node_executions WHERE id = $1";
         let row = client
@@ -62,11 +68,15 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
         dag_execution_id: &str,
         node_id: &str,
     ) -> Result<DAGNodeExecution, String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
-        let query = "SELECT * FROM dag_node_executions WHERE dag_execution_id = $1 AND dag_node_id = $2";
+        let query =
+            "SELECT * FROM dag_node_executions WHERE dag_execution_id = $1 AND dag_node_id = $2";
         let row = client
             .query_one(query, &[&dag_execution_id, &node_id])
             .await
@@ -81,18 +91,27 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
         status: DAGStatus,
         error_message: Option<&str>,
     ) -> Result<(), String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let status_str = dag_status_to_string(status);
-        let mut fields = vec!["updated_at = NOW()".to_string(), format!("status = '{}'", status_str)];
+        let mut fields = vec![
+            "updated_at = NOW()".to_string(),
+            format!("status = '{}'", status_str),
+        ];
 
         if status == DAGStatus::Running {
             fields.push("started_at = COALESCE(started_at, NOW())".to_string());
         }
 
-        if status == DAGStatus::Completed || status == DAGStatus::Failed || status == DAGStatus::Cancelled {
+        if status == DAGStatus::Completed
+            || status == DAGStatus::Failed
+            || status == DAGStatus::Cancelled
+        {
             fields.push("completed_at = COALESCE(completed_at, NOW())".to_string());
         }
 
@@ -103,24 +122,26 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
                 fields.push("error_message = $1".to_string());
                 params.push(&err_msg);
                 params.push(&dag_execution_id);
-                
+
                 let query = format!(
                     "UPDATE dag_executions SET {} WHERE id = $2",
                     fields.join(", ")
                 );
-                
-                client.execute(&query, &params).await.map_err(|e| {
-                    format!("Failed to update DAG execution status: {}", e)
-                })?
+
+                client
+                    .execute(&query, &params)
+                    .await
+                    .map_err(|e| format!("Failed to update DAG execution status: {}", e))?
             }
             None => {
                 let query = format!(
                     "UPDATE dag_executions SET {} WHERE id = $1",
                     fields.join(", ")
                 );
-                client.execute(&query, &[&dag_execution_id]).await.map_err(|e| {
-                    format!("Failed to update DAG execution status: {}", e)
-                })?
+                client
+                    .execute(&query, &[&dag_execution_id])
+                    .await
+                    .map_err(|e| format!("Failed to update DAG execution status: {}", e))?
             }
         };
 
@@ -137,9 +158,12 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
         status: DAGNodeStatus,
         data: Option<NodeExecutionUpdate>,
     ) -> Result<(), String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let status_str = dag_node_status_to_string(status);
         let mut fields = vec![
@@ -151,20 +175,25 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
             fields.push("started_at = COALESCE(started_at, NOW())".to_string());
         }
 
-        if status == DAGNodeStatus::Completed || status == DAGNodeStatus::Failed || status == DAGNodeStatus::Skipped {
+        if status == DAGNodeStatus::Completed
+            || status == DAGNodeStatus::Failed
+            || status == DAGNodeStatus::Skipped
+        {
             fields.push("completed_at = COALESCE(completed_at, NOW())".to_string());
         }
 
         // Build and execute everything in one block to avoid lifetime issues
         let result = {
             // Serialize JSON fields first (these are owned values)
-            let inputs_json_opt = data.as_ref()
+            let inputs_json_opt = data
+                .as_ref()
                 .and_then(|u| u.inputs.as_ref())
                 .map(|inputs| serde_json::to_string(inputs))
                 .transpose()
                 .map_err(|e| format!("Failed to serialize inputs: {}", e))?;
 
-            let outputs_json_opt = data.as_ref()
+            let outputs_json_opt = data
+                .as_ref()
                 .and_then(|u| u.outputs.as_ref())
                 .map(|outputs| serde_json::to_string(outputs))
                 .transpose()
@@ -219,13 +248,17 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
                 param_count
             );
 
-            client.execute(&query, &params).await.map_err(|e| {
-                format!("Failed to update DAG node execution status: {}", e)
-            })?
+            client
+                .execute(&query, &params)
+                .await
+                .map_err(|e| format!("Failed to update DAG node execution status: {}", e))?
         };
 
         if result == 0 {
-            return Err(format!("DAG node execution not found: {}", node_execution_id));
+            return Err(format!(
+                "DAG node execution not found: {}",
+                node_execution_id
+            ));
         }
 
         Ok(())
@@ -235,9 +268,12 @@ impl DAGExecutionRepository for PostgresDAGExecutionRepository {
         &self,
         dag_execution_id: &str,
     ) -> Result<DAGExecutionStats, String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let query = r#"
             SELECT

@@ -1,7 +1,7 @@
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{
-    Container, EnvVar, PodSpec, ResourceRequirements as K8sResourceRequirements,
-    Volume, VolumeMount,
+    Container, EnvVar, PodSpec, ResourceRequirements as K8sResourceRequirements, Volume,
+    VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::{
@@ -28,11 +28,15 @@ impl K8sClient {
             .unwrap_or_default()
             .eq_ignore_ascii_case("true")
         {
-            Config::incluster()
-                .map_err(|e| KubernetesError::ConfigError(format!("Failed to load in-cluster config: {}", e)))?
+            Config::incluster().map_err(|e| {
+                KubernetesError::ConfigError(format!("Failed to load in-cluster config: {}", e))
+            })?
         } else {
-            Config::from_kubeconfig(&Default::default()).await
-                .map_err(|e| KubernetesError::ConfigError(format!("Failed to load kubeconfig: {}", e)))?
+            Config::from_kubeconfig(&Default::default())
+                .await
+                .map_err(|e| {
+                    KubernetesError::ConfigError(format!("Failed to load kubeconfig: {}", e))
+                })?
         };
 
         let client = Client::try_from(config)
@@ -47,9 +51,11 @@ impl K8sClient {
 
     /// Create a Kubernetes job from a JobExecutionSpec
     pub async fn create_job(&self, spec: &JobExecutionSpec) -> Result<Job> {
-        let output_collector_image = std::env::var("OUTPUT_COLLECTOR_IMAGE")
-            .unwrap_or_else(|_| "us-docker.pkg.dev/sonic-glazing-475623-j4/job-orchestrator/output-collector:latest".to_string());
-        
+        let output_collector_image = std::env::var("OUTPUT_COLLECTOR_IMAGE").unwrap_or_else(|_| {
+            "us-docker.pkg.dev/sonic-glazing-475623-j4/job-orchestrator/output-collector:latest"
+                .to_string()
+        });
+
         let api_service_url = std::env::var("API_SERVICE_URL")
             .unwrap_or_else(|_| "http://job-orchestrator-api".to_string());
 
@@ -60,8 +66,14 @@ impl K8sClient {
 
         let labels = {
             let mut map = BTreeMap::new();
-            map.insert("app.kubernetes.io/managed-by".to_string(), "job-orchestrator".to_string());
-            map.insert("job-orchestrator.io/job-id".to_string(), spec.job_id.clone());
+            map.insert(
+                "app.kubernetes.io/managed-by".to_string(),
+                "job-orchestrator".to_string(),
+            );
+            map.insert(
+                "job-orchestrator.io/job-id".to_string(),
+                spec.job_id.clone(),
+            );
             for (k, v) in &spec.labels {
                 map.insert(k.clone(), v.clone());
             }
@@ -88,13 +100,19 @@ impl K8sClient {
                 requests: Some({
                     let mut reqs = BTreeMap::new();
                     reqs.insert("cpu".to_string(), Quantity(spec.resources.cpu.clone()));
-                    reqs.insert("memory".to_string(), Quantity(spec.resources.memory.clone()));
+                    reqs.insert(
+                        "memory".to_string(),
+                        Quantity(spec.resources.memory.clone()),
+                    );
                     reqs
                 }),
                 limits: Some({
                     let mut lims = BTreeMap::new();
                     lims.insert("cpu".to_string(), Quantity(spec.resources.cpu.clone()));
-                    lims.insert("memory".to_string(), Quantity(spec.resources.memory.clone()));
+                    lims.insert(
+                        "memory".to_string(),
+                        Quantity(spec.resources.memory.clone()),
+                    );
                     lims
                 }),
                 ..Default::default()
@@ -200,10 +218,7 @@ impl K8sClient {
             ..Default::default()
         };
 
-        let jobs_api = Api::<Job>::namespaced(
-            self.client.clone(),
-            &spec.namespace,
-        );
+        let jobs_api = Api::<Job>::namespaced(self.client.clone(), &spec.namespace);
 
         match jobs_api.create(&PostParams::default(), &job_manifest).await {
             Ok(job) => {
@@ -241,7 +256,9 @@ impl K8sClient {
                                 condition_type: c.type_.clone(),
                                 status: c.status.clone(),
                                 last_probe_time: c.last_probe_time.map(|t| t.0.to_rfc3339()),
-                                last_transition_time: c.last_transition_time.map(|t| t.0.to_rfc3339()),
+                                last_transition_time: c
+                                    .last_transition_time
+                                    .map(|t| t.0.to_rfc3339()),
                                 reason: c.reason.clone(),
                                 message: c.message.clone(),
                             })
@@ -260,10 +277,7 @@ impl K8sClient {
     pub async fn delete_job(&self, job_name: &str, namespace: &str) -> Result<()> {
         let jobs_api = Api::<Job>::namespaced(self.client.clone(), namespace);
 
-        match jobs_api
-            .delete(job_name, &DeleteParams::background())
-            .await
-        {
+        match jobs_api.delete(job_name, &DeleteParams::background()).await {
             Ok(_) => {
                 info!(job_name, namespace, "Deleted Kubernetes job");
                 Ok(())
@@ -281,22 +295,29 @@ impl K8sClient {
 
     /// Get pod logs for a job
     pub async fn get_pod_logs(&self, job_name: &str, namespace: &str) -> Result<String> {
-        let pods_api = Api::<k8s_openapi::api::core::v1::Pod>::namespaced(
-            self.client.clone(),
-            namespace,
-        );
+        let pods_api =
+            Api::<k8s_openapi::api::core::v1::Pod>::namespaced(self.client.clone(), namespace);
 
         // Find pods for this job
         let label_selector = format!("job-name={}", job_name);
-        match pods_api.list(&kube::api::ListParams::default().labels(&label_selector)).await {
+        match pods_api
+            .list(&kube::api::ListParams::default().labels(&label_selector))
+            .await
+        {
             Ok(pod_list) => {
                 if let Some(pod) = pod_list.items.first() {
                     if let Some(pod_name) = pod.metadata.name.as_ref() {
                         // Get logs from the "job" container (not the output-collector)
-                        match pods_api.logs(pod_name, &kube::api::LogParams {
-                            container: Some("job".to_string()),
-                            ..Default::default()
-                        }).await {
+                        match pods_api
+                            .logs(
+                                pod_name,
+                                &kube::api::LogParams {
+                                    container: Some("job".to_string()),
+                                    ..Default::default()
+                                },
+                            )
+                            .await
+                        {
                             Ok(logs) => Ok(logs),
                             Err(e) => {
                                 warn!(error = ?e, job_name, namespace, "Failed to get pod logs");

@@ -4,10 +4,8 @@ use std::sync::Arc;
 use tokio_postgres::Row;
 
 use crate::connection::Database;
-use dag_orchestrator::database::{
-    DAGNode, DAGTemplateRepository, InputMappingSpec, InputSource,
-};
-use types::{ExecutionMode, image};
+use dag_orchestrator::database::{DAGNode, DAGTemplateRepository, InputMappingSpec, InputSource};
+use types::{image, ExecutionMode};
 
 pub struct PostgresDAGTemplateRepository {
     db: Arc<Database>,
@@ -22,9 +20,12 @@ impl PostgresDAGTemplateRepository {
 #[async_trait]
 impl DAGTemplateRepository for PostgresDAGTemplateRepository {
     async fn get_node(&self, node_id: &str) -> Result<DAGNode, String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let query = "SELECT * FROM dag_nodes WHERE id = $1";
         let row = client
@@ -36,9 +37,12 @@ impl DAGTemplateRepository for PostgresDAGTemplateRepository {
     }
 
     async fn get_child_nodes(&self, node_id: &str) -> Result<Vec<DAGNode>, String> {
-        let client = self.db.pool.get().await.map_err(|e| {
-            format!("Failed to get database client: {}", e)
-        })?;
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let query = "SELECT * FROM dag_nodes WHERE parent_node_id = $1 ORDER BY node_order ASC";
         let rows = client
@@ -61,10 +65,7 @@ fn map_node_row(row: &Row) -> Result<DAGNode, String> {
         .ok()
         .flatten();
 
-    let args: Option<Vec<String>> = row
-        .try_get::<_, Option<Vec<String>>>("args")
-        .ok()
-        .flatten();
+    let args: Option<Vec<String>> = row.try_get::<_, Option<Vec<String>>>("args").ok().flatten();
 
     let environment_variables: Option<HashMap<String, String>> = row
         .try_get::<_, Option<String>>("environment_variables")
@@ -84,16 +85,17 @@ fn map_node_row(row: &Row) -> Result<DAGNode, String> {
         .ok()
         .flatten()
         .and_then(|s| {
-            serde_json::from_str::<serde_json::Value>(&s).ok().and_then(|v| {
-                v.as_object()
-                    .map(|obj| {
+            serde_json::from_str::<serde_json::Value>(&s)
+                .ok()
+                .and_then(|v| {
+                    v.as_object().map(|obj| {
                         obj.iter()
                             .filter_map(|(k, v)| {
                                 map_input_mapping_spec(v).map(|spec| (k.clone(), spec))
                             })
                             .collect()
                     })
-            })
+                })
         });
 
     let execution_mode = row
@@ -133,7 +135,7 @@ fn map_node_row(row: &Row) -> Result<DAGNode, String> {
 
 fn map_input_mapping_spec(value: &serde_json::Value) -> Option<InputMappingSpec> {
     let obj = value.as_object()?;
-    
+
     let source_str = obj.get("source")?.as_str()?;
     let source = match source_str {
         "parent" => InputSource::Parent,
@@ -144,8 +146,14 @@ fn map_input_mapping_spec(value: &serde_json::Value) -> Option<InputMappingSpec>
 
     Some(InputMappingSpec {
         source,
-        output_key: obj.get("outputKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        payload_key: obj.get("payloadKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        output_key: obj
+            .get("outputKey")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        payload_key: obj
+            .get("payloadKey")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         value: obj.get("value").cloned(),
     })
 }

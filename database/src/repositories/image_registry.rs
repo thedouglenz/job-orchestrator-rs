@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use executor_core::database::{ImageRegistryRepository, ImageInfo};
+use executor_core::database::{ImageInfo, ImageRegistryRepository};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,8 +19,12 @@ impl PostgresImageRegistryRepository {
 impl ImageRegistryRepository for PostgresImageRegistryRepository {
     async fn get_image(&self, image_id: &str) -> Result<ImageInfo, String> {
         let query = "SELECT * FROM image_registry WHERE id = $1";
-        
-        let client = self.db.pool.get().await
+
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let rows = client
@@ -33,7 +37,7 @@ impl ImageRegistryRepository for PostgresImageRegistryRepository {
         }
 
         let row = &rows[0];
-        
+
         // Parse JSONB columns
         let environment_variables: HashMap<String, String> = row
             .get::<_, Option<String>>("environment_variables")

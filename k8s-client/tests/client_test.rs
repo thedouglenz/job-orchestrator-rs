@@ -20,13 +20,13 @@ fn test_kubernetes_error_types() {
         KubernetesError::ConfigError(_) => {}
         _ => panic!("Expected ConfigError"),
     }
-    
+
     let create_error = KubernetesError::CreateJobError("Create failed".to_string());
     match create_error {
         KubernetesError::CreateJobError(_) => {}
         _ => panic!("Expected CreateJobError"),
     }
-    
+
     let status_error = KubernetesError::GetJobStatusError("Status failed".to_string());
     match status_error {
         KubernetesError::GetJobStatusError(_) => {}
@@ -44,7 +44,7 @@ fn test_k8s_job_status_serialization() {
         completion_time: None,
         conditions: None,
     };
-    
+
     // Test that it can be serialized
     let json = serde_json::to_string(&status).unwrap();
     assert!(json.contains("\"active\":1"));
@@ -63,7 +63,7 @@ fn test_job_status_completion() {
         conditions: None,
     };
     assert_eq!(succeeded.succeeded, 1);
-    
+
     let failed = K8sJobStatus {
         active: 0,
         succeeded: 0,
@@ -73,7 +73,7 @@ fn test_job_status_completion() {
         conditions: None,
     };
     assert_eq!(failed.failed, 1);
-    
+
     let running = K8sJobStatus {
         active: 1,
         succeeded: 0,
@@ -84,4 +84,3 @@ fn test_job_status_completion() {
     };
     assert_eq!(running.active, 1);
 }
-

@@ -3,9 +3,9 @@
 // Note: Full repository testing requires a test database
 // These tests focus on type conversion and data structure validation
 
-use types::{JobStatus, JobRequest};
-use std::collections::HashMap;
 use chrono::Utc;
+use std::collections::HashMap;
+use types::{JobRequest, JobStatus};
 use uuid::Uuid;
 
 fn create_test_job_request() -> JobRequest {
@@ -32,7 +32,7 @@ fn create_test_job_request() -> JobRequest {
 #[test]
 fn test_job_request_serialization() {
     let request = create_test_job_request();
-    
+
     // Test JSON serialization
     let json = serde_json::to_string(&request).unwrap();
     assert!(json.contains("test-topic"));
@@ -56,7 +56,7 @@ fn test_job_status_serialization() {
     let status = JobStatus::Running;
     let json = serde_json::to_string(&status).unwrap();
     assert_eq!(json, "\"running\"");
-    
+
     let status = JobStatus::Completed;
     let json = serde_json::to_string(&status).unwrap();
     assert_eq!(json, "\"completed\"");
@@ -68,13 +68,12 @@ fn test_environment_variables_serialization() {
     let mut env_vars = HashMap::new();
     env_vars.insert("VAR1".to_string(), "value1".to_string());
     env_vars.insert("VAR2".to_string(), "value2".to_string());
-    
+
     let json = serde_json::to_string(&env_vars).unwrap();
     assert!(json.contains("VAR1"));
     assert!(json.contains("value1"));
-    
+
     // Test deserialization
     let deserialized: HashMap<String, String> = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.get("VAR1"), Some(&"value1".to_string()));
 }
-

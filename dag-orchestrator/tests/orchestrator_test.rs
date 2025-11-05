@@ -1,8 +1,8 @@
 // Unit tests for DAG orchestrator
 
 use dag_orchestrator::database::{InputMappingSpec, InputSource};
-use types::{QueuedJob, JobStatus, ExecutionMode};
 use std::collections::HashMap;
+use types::{ExecutionMode, JobStatus, QueuedJob};
 
 // Note: Full mock implementations would require matching exact trait signatures
 // For now, we focus on testing logic that doesn't require full mocking
@@ -50,7 +50,7 @@ fn test_is_dag_job_logic() {
     let job_with_dag = create_dag_job("dag-1", "node-exec-1");
     // The is_dag_job method simply checks if dag_execution_id is Some
     assert!(job_with_dag.dag_execution_id.is_some());
-    
+
     let mut job_without_dag = create_dag_job("dag-1", "node-exec-1");
     job_without_dag.dag_execution_id = None;
     assert!(job_without_dag.dag_execution_id.is_none());
@@ -61,14 +61,14 @@ fn test_is_dag_job_logic() {
 async fn test_resolve_node_inputs_payload() {
     // This tests the input resolution pattern
     use dag_orchestrator::database::{InputMappingSpec, InputSource};
-    
+
     let execution_payload: HashMap<String, serde_json::Value> = {
         let mut map = HashMap::new();
         map.insert("param1".to_string(), serde_json::json!("value1"));
         map.insert("param2".to_string(), serde_json::json!(42));
         map
     };
-    
+
     let mut input_mapping = HashMap::new();
     input_mapping.insert(
         "input1".to_string(),
@@ -79,7 +79,7 @@ async fn test_resolve_node_inputs_payload() {
             value: None,
         },
     );
-    
+
     // Simulate the resolve_node_inputs logic
     let mut resolved_inputs = types::io::JobInputs::new();
     if let Some(spec) = input_mapping.get("input1") {
@@ -91,20 +91,23 @@ async fn test_resolve_node_inputs_payload() {
             }
         }
     }
-    
-    assert_eq!(resolved_inputs.get("input1"), Some(&serde_json::json!("value1")));
+
+    assert_eq!(
+        resolved_inputs.get("input1"),
+        Some(&serde_json::json!("value1"))
+    );
 }
 
 #[tokio::test]
 async fn test_resolve_node_inputs_parent_output() {
     use dag_orchestrator::database::{InputMappingSpec, InputSource};
-    
+
     let parent_outputs = {
         let mut outputs = HashMap::new();
         outputs.insert("output1".to_string(), serde_json::json!("result1"));
         outputs
     };
-    
+
     let mut input_mapping = HashMap::new();
     input_mapping.insert(
         "input1".to_string(),
@@ -115,7 +118,7 @@ async fn test_resolve_node_inputs_parent_output() {
             value: None,
         },
     );
-    
+
     // Simulate the resolve_node_inputs logic for parent outputs
     let mut resolved_inputs = types::io::JobInputs::new();
     if let Some(spec) = input_mapping.get("input1") {
@@ -127,14 +130,17 @@ async fn test_resolve_node_inputs_parent_output() {
             }
         }
     }
-    
-    assert_eq!(resolved_inputs.get("input1"), Some(&serde_json::json!("result1")));
+
+    assert_eq!(
+        resolved_inputs.get("input1"),
+        Some(&serde_json::json!("result1"))
+    );
 }
 
 #[tokio::test]
 async fn test_resolve_node_inputs_constant() {
     use dag_orchestrator::database::{InputMappingSpec, InputSource};
-    
+
     let mut input_mapping = HashMap::new();
     input_mapping.insert(
         "input1".to_string(),
@@ -145,7 +151,7 @@ async fn test_resolve_node_inputs_constant() {
             value: Some(serde_json::json!("constant_value")),
         },
     );
-    
+
     // Simulate the resolve_node_inputs logic for constants
     let mut resolved_inputs = types::io::JobInputs::new();
     if let Some(spec) = input_mapping.get("input1") {
@@ -155,8 +161,11 @@ async fn test_resolve_node_inputs_constant() {
             }
         }
     }
-    
-    assert_eq!(resolved_inputs.get("input1"), Some(&serde_json::json!("constant_value")));
+
+    assert_eq!(
+        resolved_inputs.get("input1"),
+        Some(&serde_json::json!("constant_value"))
+    );
 }
 
 // Test execution mode parsing
@@ -164,10 +173,10 @@ async fn test_resolve_node_inputs_constant() {
 async fn test_execution_mode_to_string() {
     let sequential = ExecutionMode::Sequential;
     assert_eq!(sequential.to_db_string(), "sequential");
-    
+
     let parallel = ExecutionMode::Parallel;
     assert_eq!(parallel.to_db_string(), "parallel");
-    
+
     let limited = ExecutionMode::Limited(5);
     assert_eq!(limited.to_db_string(), "limited:5");
 }
@@ -176,17 +185,16 @@ async fn test_execution_mode_to_string() {
 async fn test_execution_mode_from_string() {
     let sequential = ExecutionMode::from_db_string("sequential").unwrap();
     assert!(matches!(sequential, ExecutionMode::Sequential));
-    
+
     let parallel = ExecutionMode::from_db_string("parallel").unwrap();
     assert!(matches!(parallel, ExecutionMode::Parallel));
-    
+
     let limited = ExecutionMode::from_db_string("limited:10").unwrap();
     match limited {
         ExecutionMode::Limited(n) => assert_eq!(n, 10),
         _ => panic!("Expected Limited(10)"),
     }
-    
+
     // Test invalid mode
     assert!(ExecutionMode::from_db_string("invalid").is_err());
 }
-

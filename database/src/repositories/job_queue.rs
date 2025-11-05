@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use postgres_types::Json;
 use executor_core::database::JobQueueRepository;
+use postgres_types::Json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use types::{JobRequest, JobStatusUpdate, QueuedJob, JobStatus};
+use types::{JobRequest, JobStatus, JobStatusUpdate, QueuedJob};
 
 use crate::connection::Database;
 
@@ -64,12 +64,18 @@ impl JobQueueRepository for PostgresJobQueueRepository {
             .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
 
         // Parse image_id to UUID for PostgreSQL
-        let image_uuid: uuid::Uuid = request.image_id.parse()
+        let image_uuid: uuid::Uuid = request
+            .image_id
+            .parse()
             .map_err(|e| format!("Invalid image_id UUID: {}", e))?;
 
         // For PostgreSQL TEXT[] arrays, handle Option<Vec<String>> properly
         // We need to pass Option<&[&str]> or handle None separately
-        let client = self.db.pool.get().await
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         // Handle nullable arrays - tokio-postgres needs Option<&[impl ToSql]>
@@ -120,11 +126,17 @@ impl JobQueueRepository for PostgresJobQueueRepository {
             return Ok(Vec::new());
         }
 
-        let mut client = self.db.pool.get().await
+        let mut client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         // Use a transaction for atomicity
-        let transaction = client.transaction().await
+        let transaction = client
+            .transaction()
+            .await
             .map_err(|e| format!("Failed to start transaction: {}", e))?;
 
         let mut job_ids = Vec::with_capacity(requests.len());
@@ -174,7 +186,9 @@ impl JobQueueRepository for PostgresJobQueueRepository {
                 .map(|v| Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null)));
 
             // Parse image_id
-            let image_uuid: uuid::Uuid = request.image_id.parse()
+            let image_uuid: uuid::Uuid = request
+                .image_id
+                .parse()
                 .map_err(|e| format!("Invalid image_id UUID: {}", e))?;
 
             // Convert arrays to Option<&[&str]>
@@ -219,7 +233,9 @@ impl JobQueueRepository for PostgresJobQueueRepository {
         }
 
         // Commit the transaction
-        transaction.commit().await
+        transaction
+            .commit()
+            .await
             .map_err(|e| format!("Failed to commit batch transaction: {}", e))?;
 
         Ok(job_ids)
@@ -252,7 +268,11 @@ impl JobQueueRepository for PostgresJobQueueRepository {
             RETURNING *
         "#;
 
-        let client = self.db.pool.get().await
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let rows = client
@@ -270,8 +290,12 @@ impl JobQueueRepository for PostgresJobQueueRepository {
 
     async fn get_job(&self, job_id: &str) -> Result<QueuedJob, String> {
         let query = "SELECT * FROM job_queue WHERE id = $1";
-        
-        let client = self.db.pool.get().await
+
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let rows = client
@@ -328,12 +352,14 @@ impl JobQueueRepository for PostgresJobQueueRepository {
         }
 
         let result_json_opt = if let Some(ref result_data) = update.result_data {
-            Some(serde_json::to_string(result_data)
-                .map_err(|e| format!("Failed to serialize result data: {}", e))?)
+            Some(
+                serde_json::to_string(result_data)
+                    .map_err(|e| format!("Failed to serialize result data: {}", e))?,
+            )
         } else {
             None
         };
-        
+
         if let Some(ref result_json) = result_json_opt {
             fields.push(format!("result_data = ${}", param_count));
             params.push(result_json);
@@ -348,7 +374,11 @@ impl JobQueueRepository for PostgresJobQueueRepository {
             param_count
         );
 
-        let client = self.db.pool.get().await
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let rows_affected = client
@@ -375,7 +405,11 @@ impl JobQueueRepository for PostgresJobQueueRepository {
             WHERE id = $1
         "#;
 
-        let client = self.db.pool.get().await
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let rows_affected = client
@@ -392,8 +426,12 @@ impl JobQueueRepository for PostgresJobQueueRepository {
 
     async fn get_distinct_topics(&self) -> Result<Vec<String>, String> {
         let query = "SELECT DISTINCT topic FROM job_queue WHERE status = 'pending'";
-        
-        let client = self.db.pool.get().await
+
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         let rows = client
@@ -414,21 +452,21 @@ fn map_row_to_queued_job(row: &tokio_postgres::Row) -> Result<QueuedJob, String>
         .try_get::<_, Option<chrono::DateTime<chrono::Utc>>>("claimed_at")
         .ok()
         .flatten();
-    
+
     let started_at: Option<chrono::DateTime<chrono::Utc>> = row
         .try_get::<_, Option<chrono::DateTime<chrono::Utc>>>("started_at")
         .ok()
         .flatten();
-    
+
     let completed_at: Option<chrono::DateTime<chrono::Utc>> = row
         .try_get::<_, Option<chrono::DateTime<chrono::Utc>>>("completed_at")
         .ok()
         .flatten();
-    
+
     let created_at: chrono::DateTime<chrono::Utc> = row
         .try_get::<_, chrono::DateTime<chrono::Utc>>("created_at")
         .map_err(|e| format!("Failed to get created_at: {}", e))?;
-    
+
     let updated_at: chrono::DateTime<chrono::Utc> = row
         .try_get::<_, chrono::DateTime<chrono::Utc>>("updated_at")
         .map_err(|e| format!("Failed to get updated_at: {}", e))?;
@@ -439,10 +477,7 @@ fn map_row_to_queued_job(row: &tokio_postgres::Row) -> Result<QueuedJob, String>
         .ok()
         .flatten();
 
-    let args: Option<Vec<String>> = row
-        .try_get::<_, Option<Vec<String>>>("args")
-        .ok()
-        .flatten();
+    let args: Option<Vec<String>> = row.try_get::<_, Option<Vec<String>>>("args").ok().flatten();
 
     let environment_variables: Option<HashMap<String, String>> = row
         .try_get::<_, Option<String>>("environment_variables")
@@ -526,4 +561,3 @@ fn parse_job_status(s: String) -> Result<JobStatus, String> {
         _ => Err(format!("Unknown job status: {}", s)),
     }
 }
-

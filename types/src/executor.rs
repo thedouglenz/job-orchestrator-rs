@@ -86,11 +86,17 @@ impl<'de> Deserialize<'de> for ExecutionMode {
             "sequential" => Ok(ExecutionMode::Sequential),
             "parallel" => Ok(ExecutionMode::Parallel),
             s if s.starts_with("limited:") => {
-                let n = s.strip_prefix("limited:").unwrap().parse::<i32>()
+                let n = s
+                    .strip_prefix("limited:")
+                    .unwrap()
+                    .parse::<i32>()
                     .map_err(serde::de::Error::custom)?;
                 Ok(ExecutionMode::Limited(n))
             }
-            _ => Err(serde::de::Error::custom(format!("Unknown execution mode: {}", s))),
+            _ => Err(serde::de::Error::custom(format!(
+                "Unknown execution mode: {}",
+                s
+            ))),
         }
     }
 }
@@ -122,7 +128,8 @@ impl ExecutionMode {
             "sequential" => Ok(ExecutionMode::Sequential),
             "parallel" => Ok(ExecutionMode::Parallel),
             s if s.starts_with("limited:") => {
-                let n = s.strip_prefix("limited:")
+                let n = s
+                    .strip_prefix("limited:")
                     .ok_or_else(|| "Invalid limited format".to_string())?
                     .parse::<i32>()
                     .map_err(|e| format!("Failed to parse limit: {}", e))?;

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use executor_core::database::{JobExecutionHistoryRepository, HistoryEntry};
+use executor_core::database::{HistoryEntry, JobExecutionHistoryRepository};
 use std::sync::Arc;
 
 use crate::connection::Database;
@@ -32,13 +32,21 @@ impl JobExecutionHistoryRepository for PostgresJobExecutionHistoryRepository {
             types::JobStatus::Cancelled => "cancelled",
         };
 
-        let k8s_events_json = entry.k8s_events.as_ref()
+        let k8s_events_json = entry
+            .k8s_events
+            .as_ref()
             .and_then(|v| serde_json::to_string(v).ok());
-        
-        let metadata_json = entry.metadata.as_ref()
+
+        let metadata_json = entry
+            .metadata
+            .as_ref()
             .and_then(|m| serde_json::to_string(m).ok());
 
-        let client = self.db.pool.get().await
+        let client = self
+            .db
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
         client

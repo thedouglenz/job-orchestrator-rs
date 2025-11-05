@@ -1,14 +1,14 @@
 // Unit tests for JobExecutor
 
 use executor_core::error::ExecutorError;
-use types::{ExecutorConfig, QueuedJob, JobStatus};
-use std::sync::Arc;
 use mockall::mock;
+use std::sync::Arc;
+use types::{ExecutorConfig, JobStatus, QueuedJob};
 
 // Mock implementations using mockall
 mock! {
     JobQueueRepo {}
-    
+
     #[async_trait::async_trait]
     impl executor_core::database::JobQueueRepository for JobQueueRepo {
         async fn enqueue_job(&self, request: &types::JobRequest) -> Result<String, String>;
@@ -23,7 +23,7 @@ mock! {
 
 mock! {
     ImageRegistryRepo {}
-    
+
     #[async_trait::async_trait]
     impl executor_core::database::ImageRegistryRepository for ImageRegistryRepo {
         async fn get_image(&self, image_id: &str) -> Result<executor_core::database::ImageInfo, String>;
@@ -32,7 +32,7 @@ mock! {
 
 mock! {
     HistoryRepo {}
-    
+
     #[async_trait::async_trait]
     impl executor_core::database::JobExecutionHistoryRepository for HistoryRepo {
         async fn create_entry(&self, entry: &executor_core::database::HistoryEntry) -> Result<(), String>;
@@ -87,11 +87,11 @@ fn should_retry_job(job: &QueuedJob, error: &ExecutorError) -> bool {
     if job.retry_count >= job.max_retries {
         return false;
     }
-    
+
     if error.is_permanent() {
         return false;
     }
-    
+
     true
 }
 
@@ -100,9 +100,9 @@ async fn test_should_retry_job_within_max_retries() {
     let mut job = create_test_job();
     job.retry_count = 1;
     job.max_retries = 3;
-    
+
     let error = ExecutorError::job_execution_error("transient error", "transient");
-    
+
     assert!(should_retry_job(&job, &error));
 }
 
@@ -111,9 +111,9 @@ async fn test_should_not_retry_job_at_max_retries() {
     let mut job = create_test_job();
     job.retry_count = 3;
     job.max_retries = 3;
-    
+
     let error = ExecutorError::job_execution_error("transient error", "transient");
-    
+
     assert!(!should_retry_job(&job, &error));
 }
 
@@ -122,9 +122,9 @@ async fn test_should_not_retry_permanent_errors() {
     let mut job = create_test_job();
     job.retry_count = 0;
     job.max_retries = 3;
-    
+
     let error = ExecutorError::job_execution_error("permanent error", "permanent");
-    
+
     assert!(!should_retry_job(&job, &error));
 }
 
@@ -132,10 +132,10 @@ async fn test_should_not_retry_permanent_errors() {
 async fn test_error_permanent_detection() {
     let transient_error = ExecutorError::job_execution_error("error", "transient");
     assert!(!transient_error.is_permanent());
-    
+
     let permanent_error = ExecutorError::job_execution_error("error", "permanent");
     assert!(permanent_error.is_permanent());
-    
+
     let db_error = ExecutorError::DatabaseError("db error".to_string());
     // Database errors are not considered permanent by default
     assert!(!db_error.is_permanent());
@@ -151,23 +151,26 @@ async fn test_get_effective_topics_all() {
         kubernetes_namespace: "default".to_string(),
         instance_id: "test-executor".to_string(),
     };
-    
+
     let mut mock_repo = MockJobQueueRepo::new();
     mock_repo
         .expect_get_distinct_topics()
         .times(1)
         .returning(|| Ok(vec!["topic1".to_string(), "topic2".to_string()]));
-    
+
     let job_repo: Arc<dyn executor_core::database::JobQueueRepository> = Arc::new(mock_repo);
-    
+
     // This tests the logic pattern - mirrors get_effective_topics in executor.rs
     let effective_topics = if config.topics.contains(&"ALL".to_string()) {
         job_repo.get_distinct_topics().await.unwrap()
     } else {
         config.topics.clone()
     };
-    
-    assert_eq!(effective_topics, vec!["topic1".to_string(), "topic2".to_string()]);
+
+    assert_eq!(
+        effective_topics,
+        vec!["topic1".to_string(), "topic2".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -179,14 +182,17 @@ async fn test_get_effective_topics_specific() {
         kubernetes_namespace: "default".to_string(),
         instance_id: "test-executor".to_string(),
     };
-    
+
     let effective_topics = if !config.topics.contains(&"ALL".to_string()) {
         config.topics.clone()
     } else {
         vec![]
     };
-    
-    assert_eq!(effective_topics, vec!["topic1".to_string(), "topic2".to_string()]);
+
+    assert_eq!(
+        effective_topics,
+        vec!["topic1".to_string(), "topic2".to_string()]
+    );
 }
 
 // Test concurrency limit calculation
@@ -199,11 +205,11 @@ async fn test_concurrency_limit_calculation() {
         kubernetes_namespace: "default".to_string(),
         instance_id: "test-executor".to_string(),
     };
-    
+
     // Concurrency limit is batch_size * 10 in the executor
     let max_concurrent = config.batch_size * 10;
     assert_eq!(max_concurrent, 50);
-    
+
     let config_large = ExecutorConfig {
         batch_size: 10,
         ..config.clone()
@@ -211,4 +217,3 @@ async fn test_concurrency_limit_calculation() {
     let max_concurrent_large = config_large.batch_size * 10;
     assert_eq!(max_concurrent_large, 100);
 }
-

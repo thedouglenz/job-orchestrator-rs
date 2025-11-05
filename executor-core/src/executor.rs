@@ -4,16 +4,14 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
+use crate::dag_trait::DAGOrchestratorTrait;
 use crate::database::{
-    JobExecutionHistoryRepository, JobQueueRepository, ImageRegistryRepository,
-    HistoryEntry,
+    HistoryEntry, ImageRegistryRepository, JobExecutionHistoryRepository, JobQueueRepository,
 };
 use crate::error::{ExecutorError, Result};
-use crate::dag_trait::DAGOrchestratorTrait;
 use k8s_client::K8sClient;
 use types::{
-    ExecutorConfig, JobExecutionSpec, JobOutputs, JobStatus, QueuedJob,
-    ReadyNotification, Priority,
+    ExecutorConfig, JobExecutionSpec, JobOutputs, JobStatus, Priority, QueuedJob, ReadyNotification,
 };
 
 /// Main job executor
@@ -65,7 +63,7 @@ impl JobExecutor {
         // Limit concurrent jobs (tune based on memory/CPU constraints)
         // Default to 50 concurrent jobs, but allow config override
         let max_concurrent = config.batch_size * 10; // Allow reasonable concurrency
-        
+
         Self {
             config,
             job_repo,
@@ -91,7 +89,7 @@ impl JobExecutor {
         );
 
         *self.running.write().await = true;
-        
+
         // If we have a channel, we'll use event-driven mode (caller manages the loop)
         // Otherwise, use polling mode
         if self.ready_tx.is_none() {
@@ -202,7 +200,7 @@ impl JobExecutor {
         dag_orchestrator: Option<&Arc<dyn DAGOrchestratorTrait>>,
     ) -> Result<()> {
         let topics = Self::get_effective_topics(config, job_repo).await?;
-        
+
         let jobs = job_repo
             .claim_jobs(&topics, config.batch_size, &config.instance_id)
             .await
@@ -268,8 +266,9 @@ impl JobExecutor {
 
         // Claim up to the notified job count, respecting batch_size limit
         let limit = notification.job_count.min(self.config.batch_size);
-        
-        let jobs = match self.job_repo
+
+        let jobs = match self
+            .job_repo
             .claim_jobs(&topics, limit, &self.config.instance_id)
             .await
         {
@@ -301,7 +300,7 @@ impl JobExecutor {
                     tokio::spawn(async move {
                         // Hold permit until job execution completes
                         let _permit = permit;
-                        
+
                         if let Err(e) = Self::execute_job(
                             &job,
                             &config,
@@ -407,12 +406,14 @@ impl JobExecutor {
         }
 
         // Build job execution spec
-        let mut resources = image.default_resources.clone().unwrap_or_else(||
-            types::image::ResourceRequirements {
-                cpu: "100m".to_string(),
-                memory: "128Mi".to_string(),
-            }
-        );
+        let mut resources =
+            image
+                .default_resources
+                .clone()
+                .unwrap_or_else(|| types::image::ResourceRequirements {
+                    cpu: "100m".to_string(),
+                    memory: "128Mi".to_string(),
+                });
 
         // Apply resource overrides from job
         if let Some(ref overrides) = job.resource_overrides {
@@ -439,9 +440,10 @@ impl JobExecutor {
             resources,
             labels,
             namespace: config.kubernetes_namespace.clone(),
-            job_name: job.k8s_job_name.clone().unwrap_or_else(|| {
-                format!("job-{}", &job.id[..std::cmp::min(8, job.id.len())])
-            }),
+            job_name: job
+                .k8s_job_name
+                .clone()
+                .unwrap_or_else(|| format!("job-{}", &job.id[..std::cmp::min(8, job.id.len())])),
         };
 
         // Create Kubernetes job
@@ -516,7 +518,11 @@ impl JobExecutor {
         });
 
         let duration = start_time.elapsed();
-        info!(job_id = job.id, duration_ms = duration.as_millis(), "Job started successfully");
+        info!(
+            job_id = job.id,
+            duration_ms = duration.as_millis(),
+            "Job started successfully"
+        );
 
         Ok(())
     }
@@ -570,9 +576,10 @@ impl JobExecutor {
                                 status: JobStatus::Completed,
                                 message: Some("Job completed successfully".to_string()),
                                 pod_logs: Some(log_truncated.to_string()),
-                                k8s_events: status.conditions.as_ref().map(|c| {
-                                    serde_json::json!(c)
-                                }),
+                                k8s_events: status
+                                    .conditions
+                                    .as_ref()
+                                    .map(|c| serde_json::json!(c)),
                                 metadata: None,
                             })
                             .await
@@ -602,10 +609,13 @@ impl JobExecutor {
                             .await
                             .unwrap_or_default();
 
-                        let should_retry = Self::should_retry_job(job, &ExecutorError::job_execution_error(
-                            "Kubernetes job failed",
-                            "transient",
-                        ));
+                        let should_retry = Self::should_retry_job(
+                            job,
+                            &ExecutorError::job_execution_error(
+                                "Kubernetes job failed",
+                                "transient",
+                            ),
+                        );
 
                         if should_retry {
                             job_repo
@@ -671,9 +681,10 @@ impl JobExecutor {
                                     status: JobStatus::Failed,
                                     message: Some("Kubernetes Job permanently failed".to_string()),
                                     pod_logs: Some(log_truncated.to_string()),
-                                    k8s_events: status.conditions.as_ref().map(|c| {
-                                        serde_json::json!(c)
-                                    }),
+                                    k8s_events: status
+                                        .conditions
+                                        .as_ref()
+                                        .map(|c| serde_json::json!(c)),
                                     metadata: None,
                                 })
                                 .await
@@ -684,7 +695,9 @@ impl JobExecutor {
                             // Handle DAG orchestration if this is a DAG job
                             if let Some(dag) = dag_orchestrator {
                                 if dag.is_dag_job(job) {
-                                    if let Err(e) = dag.handle_job_failure(job, "Kubernetes job failed").await {
+                                    if let Err(e) =
+                                        dag.handle_job_failure(job, "Kubernetes job failed").await
+                                    {
                                         error!(error = ?e, job_id = job.id, "Error handling DAG job failure");
                                     }
                                 }
@@ -739,11 +752,14 @@ impl JobExecutor {
                 pod_logs: if logs.is_empty() {
                     Some("No logs available".to_string())
                 } else {
-                    Some(if logs.len() > 50000 {
-                        &logs[..50000]
-                    } else {
-                        &logs
-                    }.to_string())
+                    Some(
+                        if logs.len() > 50000 {
+                            &logs[..50000]
+                        } else {
+                            &logs
+                        }
+                        .to_string(),
+                    )
                 },
                 k8s_events: None,
                 metadata: None,
@@ -798,4 +814,3 @@ impl JobExecutor {
         None
     }
 }
-

@@ -1,7 +1,7 @@
 // Common test utilities and fixtures
 
-use types::{ExecutorConfig, JobRequest, ResourceRequirements};
 use executor_core::database::ImageInfo;
+use types::{ExecutorConfig, JobRequest, ResourceRequirements};
 use uuid::Uuid;
 
 pub mod fixtures;
@@ -55,7 +55,7 @@ where
 {
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_millis(timeout_ms);
-    
+
     while start.elapsed() < timeout {
         if condition().await {
             return true;
@@ -64,4 +64,3 @@ where
     }
     false
 }
-

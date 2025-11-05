@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use types::{JobRequest, QueuedJob, JobOutputs};
 use std::collections::HashMap;
+use types::{JobOutputs, JobRequest, QueuedJob};
 
 // Use JobQueueRepository from executor-core to avoid duplication
 pub use executor_core::database::JobQueueRepository;
@@ -8,12 +8,34 @@ pub use executor_core::database::JobQueueRepository;
 /// DAG execution repository trait
 #[async_trait]
 pub trait DAGExecutionRepository: Send + Sync {
-    async fn get_execution(&self, dag_execution_id: &str, include_nodes: bool) -> Result<DAGExecution, String>;
-    async fn get_node_execution(&self, node_execution_id: &str) -> Result<DAGNodeExecution, String>;
-    async fn get_node_execution_by_dag_and_node(&self, dag_execution_id: &str, node_id: &str) -> Result<DAGNodeExecution, String>;
-    async fn update_execution_status(&self, dag_execution_id: &str, status: DAGStatus, error_message: Option<&str>) -> Result<(), String>;
-    async fn update_node_execution_status(&self, node_execution_id: &str, status: DAGNodeStatus, data: Option<NodeExecutionUpdate>) -> Result<(), String>;
-    async fn get_execution_stats(&self, dag_execution_id: &str) -> Result<DAGExecutionStats, String>;
+    async fn get_execution(
+        &self,
+        dag_execution_id: &str,
+        include_nodes: bool,
+    ) -> Result<DAGExecution, String>;
+    async fn get_node_execution(&self, node_execution_id: &str)
+        -> Result<DAGNodeExecution, String>;
+    async fn get_node_execution_by_dag_and_node(
+        &self,
+        dag_execution_id: &str,
+        node_id: &str,
+    ) -> Result<DAGNodeExecution, String>;
+    async fn update_execution_status(
+        &self,
+        dag_execution_id: &str,
+        status: DAGStatus,
+        error_message: Option<&str>,
+    ) -> Result<(), String>;
+    async fn update_node_execution_status(
+        &self,
+        node_execution_id: &str,
+        status: DAGNodeStatus,
+        data: Option<NodeExecutionUpdate>,
+    ) -> Result<(), String>;
+    async fn get_execution_stats(
+        &self,
+        dag_execution_id: &str,
+    ) -> Result<DAGExecutionStats, String>;
 }
 
 /// DAG template repository trait

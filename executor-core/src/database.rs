@@ -1,8 +1,6 @@
 use async_trait::async_trait;
-use types::{
-    JobRequest, JobStatusUpdate, QueuedJob, JobStatus,
-};
 use std::collections::HashMap;
+use types::{JobRequest, JobStatus, JobStatusUpdate, QueuedJob};
 
 /// Database connection trait
 #[async_trait]
@@ -18,7 +16,12 @@ pub trait JobQueueRepository: Send + Sync {
     /// Enqueue multiple jobs in a single database transaction
     /// Returns the list of job IDs in the same order as the input requests
     async fn enqueue_jobs_batch(&self, requests: &[JobRequest]) -> Result<Vec<String>, String>;
-    async fn claim_jobs(&self, topics: &[String], batch_size: usize, executor_id: &str) -> Result<Vec<QueuedJob>, String>;
+    async fn claim_jobs(
+        &self,
+        topics: &[String],
+        batch_size: usize,
+        executor_id: &str,
+    ) -> Result<Vec<QueuedJob>, String>;
     async fn get_job(&self, job_id: &str) -> Result<QueuedJob, String>;
     async fn update_job_status(&self, update: &JobStatusUpdate) -> Result<(), String>;
     async fn requeue_job(&self, job_id: &str) -> Result<(), String>;

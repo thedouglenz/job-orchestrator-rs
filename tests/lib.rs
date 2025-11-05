@@ -10,4 +10,3 @@ mod tests {
         assert!(true);
     }
 }
-

@@ -15,16 +15,13 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            host: std::env::var("DATABASE_HOST")
-                .unwrap_or_else(|_| "localhost".to_string()),
+            host: std::env::var("DATABASE_HOST").unwrap_or_else(|_| "localhost".to_string()),
             port: std::env::var("DATABASE_PORT")
                 .unwrap_or_else(|_| "5432".to_string())
                 .parse()
                 .unwrap_or(5432),
-            database: std::env::var("DATABASE_NAME")
-                .unwrap_or_else(|_| "jobqueue".to_string()),
-            user: std::env::var("DATABASE_USER")
-                .unwrap_or_else(|_| "jobqueue".to_string()),
+            database: std::env::var("DATABASE_NAME").unwrap_or_else(|_| "jobqueue".to_string()),
+            user: std::env::var("DATABASE_USER").unwrap_or_else(|_| "jobqueue".to_string()),
             password: std::env::var("DB_PASSWORD").ok(),
             max_connections: Some(20),
         }
@@ -68,15 +65,13 @@ impl Database {
 
     pub async fn health_check(&self) -> bool {
         match self.pool.get().await {
-            Ok(client) => {
-                match client.query_one("SELECT 1", &[]).await {
-                    Ok(_) => true,
-                    Err(e) => {
-                        error!(error = ?e, "Database health check query failed");
-                        false
-                    }
+            Ok(client) => match client.query_one("SELECT 1", &[]).await {
+                Ok(_) => true,
+                Err(e) => {
+                    error!(error = ?e, "Database health check query failed");
+                    false
                 }
-            }
+            },
             Err(e) => {
                 error!(error = ?e, "Database health check failed - couldn't get client");
                 false
@@ -90,13 +85,21 @@ impl Database {
     }
 
     /// Execute raw SQL (useful for migrations)
-    pub async fn execute_sql(&self, sql: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = self.pool.get().await
+    pub async fn execute_sql(
+        &self,
+        sql: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let client = self
+            .pool
+            .get()
+            .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
-        
-        client.batch_execute(sql).await
+
+        client
+            .batch_execute(sql)
+            .await
             .map_err(|e| format!("Failed to execute SQL: {}", e))?;
-        
+
         Ok(())
     }
 }
