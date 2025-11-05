@@ -1,10 +1,34 @@
 // Database setup utilities for integration tests
+//
+// This module provides both mock implementations for fast unit tests
+// and testcontainers-based setup for integration tests.
 
 use database::{Database, DatabaseConfig};
 use std::sync::Arc;
 
+/// Setup mock database for unit tests (no network/docker required)
+/// This is the recommended approach for most tests as it's fast and doesn't require infrastructure
+pub fn setup_mock_database() -> Arc<dyn executor_core::database::Database> {
+    // Import the mocks module which contains MockDatabase
+    use database::mocks::MockDatabase;
+    Arc::new(MockDatabase::new())
+}
+
+/// Setup mock database that fails health checks
+/// Useful for testing error handling scenarios
+pub fn setup_mock_database_with_failed_health_check() -> Arc<dyn executor_core::database::Database>
+{
+    use database::mocks::MockDatabase;
+    Arc::new(MockDatabase::with_failed_health_check())
+}
+
 /// Setup test database using testcontainers
 /// Returns both the database connection and the container (which keeps it alive)
+///
+/// WARNING: This requires Docker to be running and will create actual containers.
+/// Only use this for integration tests that require real database behavior.
+/// For most tests, use setup_mock_database() instead.
+#[cfg(feature = "integration-tests")]
 pub async fn setup_test_database_with_container() -> Result<
     (
         Arc<Database>,
@@ -59,6 +83,10 @@ pub async fn setup_test_database_with_container() -> Result<
 
 /// Setup test database using environment variables
 /// Useful for CI/CD or when you want to use an existing database
+///
+/// WARNING: This requires a real database to be available.
+/// For most tests, use setup_mock_database() instead.
+#[cfg(feature = "integration-tests")]
 pub async fn setup_test_database_from_env() -> Result<Arc<Database>, String> {
     let config = DatabaseConfig::default();
     let db =
@@ -73,19 +101,14 @@ pub async fn setup_test_database_from_env() -> Result<Arc<Database>, String> {
 
 /// Run SQL migrations from a directory
 /// This is a simple migration runner - in production you'd use Flyway
+///
+/// Only available when integration-tests feature is enabled
+#[cfg(feature = "integration-tests")]
 pub async fn run_sql_migrations(db: &Arc<Database>, migrations: &[&str]) -> Result<(), String> {
-    // Note: This requires exposing the pool or adding a method to Database
-    // For now, this is a placeholder showing the structure
-
-    // In practice, you would:
-    // 1. Read SQL files from a migrations directory
-    // 2. Execute them in order
-    // 3. Track which migrations have been run
-
-    // For integration tests, you can either:
-    // - Pre-run migrations using Flyway
-    // - Copy migration files to tests/fixtures/ and execute them here
-    // - Use a simple SQL migration runner
-
+    for migration in migrations {
+        db.execute_sql(migration)
+            .await
+            .map_err(|e| format!("Failed to execute migration: {}", e))?;
+    }
     Ok(())
 }

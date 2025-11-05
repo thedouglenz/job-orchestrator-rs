@@ -103,3 +103,15 @@ impl Database {
         Ok(())
     }
 }
+
+// Implement the Database trait for the concrete Database struct
+#[async_trait::async_trait]
+impl executor_core::database::Database for Database {
+    async fn health_check(&self) -> bool {
+        self.health_check().await
+    }
+
+    async fn close(&self) {
+        self.close().await
+    }
+}

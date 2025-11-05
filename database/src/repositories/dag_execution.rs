@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio_postgres::Row;
-use types::io::{JobInputs};
+use types::io::JobInputs;
 
 use crate::connection::Database;
 use dag_orchestrator::database::{

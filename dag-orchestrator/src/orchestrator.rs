@@ -3,7 +3,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::database::{
-    DAGExecutionRepository, DAGNodeStatus, DAGStatus, DAGTemplateRepository, JobQueueRepository, NodeExecutionUpdate,
+    DAGExecutionRepository, DAGNodeStatus, DAGStatus, DAGTemplateRepository, JobQueueRepository,
+    NodeExecutionUpdate,
 };
 
 use types::{ExecutionMode, JobOutputs, JobRequest, Priority, QueuedJob, ReadyNotification};
