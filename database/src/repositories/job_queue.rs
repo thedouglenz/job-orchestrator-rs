@@ -104,8 +104,8 @@ impl JobQueueRepository for PostgresJobQueueRepository {
                     &args_param,
                     &env_vars_json,
                     &resource_overrides_json,
-                    &(request.priority.unwrap_or(0) as i32),
-                    &(request.max_retries.unwrap_or(3) as i32),
+                    &{ request.priority.unwrap_or(0) },
+                    &{ request.max_retries.unwrap_or(3) },
                     &request.created_by,
                     &labels_json,
                     &inputs_json,
@@ -215,8 +215,8 @@ impl JobQueueRepository for PostgresJobQueueRepository {
                         &args_param,
                         &env_vars_json,
                         &resource_overrides_json,
-                        &(request.priority.unwrap_or(0) as i32),
-                        &(request.max_retries.unwrap_or(3) as i32),
+                        &{ request.priority.unwrap_or(0) },
+                        &{ request.max_retries.unwrap_or(3) },
                         &request.created_by,
                         &labels_json,
                         &inputs_json,
@@ -275,8 +275,12 @@ impl JobQueueRepository for PostgresJobQueueRepository {
             .await
             .map_err(|e| format!("Failed to get database client: {}", e))?;
 
+        // Convert Vec<String> to Vec<&str> for tokio-postgres TEXT[] array
+        let topics_vec: Vec<&str> = topics.iter().map(|s| s.as_str()).collect();
+        let topics_param: &[&str] = &topics_vec;
+
         let rows = client
-            .query(query, &[&executor_id, &topics, &(batch_size as i32)])
+            .query(query, &[&executor_id, &topics_param, &(batch_size as i32)])
             .await
             .map_err(|e| format!("Failed to claim jobs: {}", e))?;
 
